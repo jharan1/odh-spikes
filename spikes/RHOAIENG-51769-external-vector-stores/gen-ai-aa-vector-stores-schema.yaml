@@ -27,10 +27,9 @@ data:
               backend: kv_default
             custom_gen_ai:
               credentials:
-                secretRef:
-                  name: pgvector-credentials
-                  keys:
-                    - password
+                secretRefs:
+                  - name: pgvector-credentials
+                    key: password
 
         - provider_id: vector-store-provider-2
           provider_type: remote::milvus
@@ -43,10 +42,9 @@ data:
             uri: http://milvus-secure.my-project.svc.cluster.local:19530
             custom_gen_ai:
               credentials:
-                secretRef:
-                  name: milvus-credentials
-                  keys:
-                    - token
+                secretRefs:
+                  - name: milvus-credentials
+                    key: token
 
         - provider_id: vector-store-provider-4
           provider_type: remote::qdrant
@@ -57,10 +55,9 @@ data:
             prefer_grpc: false
             custom_gen_ai:
               credentials:
-                secretRef:
-                  name: qdrant-credentials
-                  keys:
-                    - api_key
+                secretRefs:
+                  - name: qdrant-credentials
+                    key: api_key
 
     registered_resources:
       vector_stores:

@@ -1,0 +1,149 @@
+# Draft gen-ai-aa-vector-stores ConfigMap Schema.
+# The bff will look for this ConfigMap (to be created by platform engineer) and used to configure vector store providers and registered vector stores for Gen AI.
+
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: gen-ai-aa-vector-stores
+  namespace: my-project
+data:
+  config.yaml: |
+    providers:
+      vector_io:
+        - provider_id: vector-store-provider-1
+          provider_type: remote::pgvector
+          config:
+            host: pgvector.my-project.svc.cluster.local
+            port: 5432
+            db: vectordb
+            user: vectoruser
+            distance_metric: COSINE
+            vector_index:
+              type: HNSW
+              m: 16
+              ef_construction: 64
+            persistence:
+              namespace: vector_io::pgvector
+              backend: kv_default
+            custom_gen_ai:
+              credentials:
+                secretRef:
+                  name: pgvector-credentials
+                  keys:
+                    - password
+
+        - provider_id: vector-store-provider-2
+          provider_type: remote::milvus
+          config:
+            uri: http://milvus.my-project.svc.cluster.local:19530
+
+        - provider_id: vector-store-provider-3
+          provider_type: remote::milvus
+          config:
+            uri: http://milvus-secure.my-project.svc.cluster.local:19530
+            custom_gen_ai:
+              credentials:
+                secretRef:
+                  name: milvus-credentials
+                  keys:
+                    - token
+
+        - provider_id: vector-store-provider-4
+          provider_type: remote::qdrant
+          config:
+            url: http://qdrant.my-project.svc.cluster.local
+            port: 6333
+            grpc_port: 6334
+            prefer_grpc: false
+            custom_gen_ai:
+              credentials:
+                secretRef:
+                  name: qdrant-credentials
+                  keys:
+                    - api_key
+
+    registered_resources:
+      vector_stores:
+        - provider_id: vector-store-provider-1
+          vector_store_id: vs_282695f8-7e3e-48da-abac-d81a0aa225a4
+          embedding_model: ibm-granite/granite-embedding-125m-english
+          embedding_dimension: 768
+          vector_store_name: "Product Docs RAG Store"
+          metadata:
+            description: "Vector store for product documentation"
+            custom_gen_ai:
+              owner: platform-team
+              domain: rag
+
+        - provider_id: vector-store-provider-1
+          vector_store_id: vs_50f14ad3-6cf4-466b-a7b6-8b01afcc1e47
+          embedding_model: ibm-granite/granite-embedding-125m-english
+          embedding_dimension: 768
+          vector_store_name: "Legal Contracts Store"
+          metadata:
+            description: "Vector store for legal document search"
+            custom_gen_ai:
+              owner: legal-team
+              domain: legal
+
+        - provider_id: vector-store-provider-2
+          vector_store_id: vs_4c4b74e3-30ac-4e46-9057-213154f83dba
+          embedding_model: ibm-granite/granite-embedding-125m-english
+          embedding_dimension: 768
+          vector_store_name: "Enterprise Search Store"
+          metadata:
+            description: "Company-wide document search"
+            custom_gen_ai:
+              owner: search-team
+              domain: search
+
+        - provider_id: vector-store-provider-3
+          vector_store_id: vs_a2607363-cea0-4d2a-8a93-7fb76863403b
+          embedding_model: ibm-granite/granite-embedding-125m-english
+          embedding_dimension: 768
+          vector_store_name: "Internal Knowledge Base"
+          metadata:
+            description: "Secure internal knowledge base"
+            custom_gen_ai:
+              owner: platform-team
+              domain: internal
+
+        - provider_id: vector-store-provider-4
+          vector_store_id: vs_3fa896ef-5e25-4935-baeb-adf9ac59cb6d
+          embedding_model: ibm-granite/granite-embedding-125m-english
+          embedding_dimension: 768
+          vector_store_name: "Support Knowledge Base"
+          metadata:
+            custom_gen_ai:
+              owner: ml-team
+              domain: support
+
+---
+# Companion Secrets for providers that require credentials:
+
+apiVersion: v1
+kind: Secret
+metadata:
+  name: pgvector-credentials
+  namespace: my-project
+type: Opaque
+stringData:
+  password: "my-pgvector-password"
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: milvus-credentials
+  namespace: my-project
+type: Opaque
+stringData:
+  token: "my-milvus-token"
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: qdrant-credentials
+  namespace: my-project
+type: Opaque
+stringData:
+  api_key: "my-qdrant-api-key"

@@ -69,8 +69,9 @@ data:
           metadata:
             description: "Vector store for product documentation"
             custom_gen_ai:
-              owner: platform-team
-              domain: rag
+              tags:
+                owner: platform-team
+                domain: rag
 
         - provider_id: vector-store-provider-1                           # pgvector — table 2
           vector_store_id: vs_50f14ad3-6cf4-466b-a7b6-8b01afcc1e47
@@ -80,8 +81,9 @@ data:
           metadata:
             description: "Vector store for legal document search"
             custom_gen_ai:
-              owner: legal-team
-              domain: legal
+              tags:
+                owner: legal-team
+                domain: legal
 
         - provider_id: vector-store-provider-2                           # milvus — no credentials
           vector_store_id: vs_4c4b74e3-30ac-4e46-9057-213154f83dba 
@@ -91,8 +93,9 @@ data:
           metadata:
             description: "Company-wide document search"
             custom_gen_ai:
-              owner: search-team
-              domain: search
+              tags:
+                owner: search-team
+                domain: search
 
         - provider_id: vector-store-provider-3                           # milvus — with token
           vector_store_id: vs_a2607363-cea0-4d2a-8a93-7fb76863403b
@@ -102,8 +105,9 @@ data:
           metadata:
             description: "Secure internal knowledge base"
             custom_gen_ai:
-              owner: platform-team
-              domain: internal
+              tags:
+                owner: platform-team
+                domain: internal
 
         - provider_id: vector-store-provider-4
           vector_store_id: vs_3fa896ef-5e25-4935-baeb-adf9ac59cb6d
@@ -112,8 +116,9 @@ data:
           vector_store_name: "Support Knowledge Base"
           metadata:
             custom_gen_ai:
-              owner: ml-team
-              domain: support
+              tags:
+                owner: ml-team
+                domain: support
 
 ---
 # Companion Secrets for providers that require credentials:

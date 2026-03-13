@@ -132,8 +132,9 @@ registered_resources:
     metadata:
       description: "Vector store for product documentation (external Qdrant Cloud)"
       custom_gen_ai:
-        owner: platform-team
-        domain: rag
+        tags:
+          owner: platform-team
+          domain: rag
   datasets: []
   scoring_fns: []
   benchmarks: []

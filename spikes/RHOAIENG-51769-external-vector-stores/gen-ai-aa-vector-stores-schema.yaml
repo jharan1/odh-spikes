@@ -62,16 +62,12 @@ data:
     registered_resources:
       vector_stores:
         - provider_id: vector-store-provider-1                           # pgvector — table 1
-          vector_store_id: vs_282695f8-7e3e-48da-abac-d81a0aa225a4 
+          vector_store_id: vs_282695f8-7e3e-48da-abac-d81a0aa225a4
           embedding_model: ibm-granite/granite-embedding-125m-english
           embedding_dimension: 768
           vector_store_name: "Product Docs RAG Store"
           metadata:
             description: "Vector store for product documentation"
-            custom_gen_ai:
-              tags:
-                owner: platform-team
-                domain: rag
 
         - provider_id: vector-store-provider-1                           # pgvector — table 2
           vector_store_id: vs_50f14ad3-6cf4-466b-a7b6-8b01afcc1e47
@@ -80,22 +76,14 @@ data:
           vector_store_name: "Legal Contracts Store"
           metadata:
             description: "Vector store for legal document search"
-            custom_gen_ai:
-              tags:
-                owner: legal-team
-                domain: legal
 
         - provider_id: vector-store-provider-2                           # milvus — no credentials
-          vector_store_id: vs_4c4b74e3-30ac-4e46-9057-213154f83dba 
+          vector_store_id: vs_4c4b74e3-30ac-4e46-9057-213154f83dba
           embedding_model: ibm-granite/granite-embedding-125m-english
           embedding_dimension: 768
           vector_store_name: "Enterprise Search Store"
           metadata:
             description: "Company-wide document search"
-            custom_gen_ai:
-              tags:
-                owner: search-team
-                domain: search
 
         - provider_id: vector-store-provider-3                           # milvus — with token
           vector_store_id: vs_a2607363-cea0-4d2a-8a93-7fb76863403b
@@ -104,21 +92,12 @@ data:
           vector_store_name: "Internal Knowledge Base"
           metadata:
             description: "Secure internal knowledge base"
-            custom_gen_ai:
-              tags:
-                owner: platform-team
-                domain: internal
 
         - provider_id: vector-store-provider-4
           vector_store_id: vs_3fa896ef-5e25-4935-baeb-adf9ac59cb6d
           embedding_model: ibm-granite/granite-embedding-125m-english
           embedding_dimension: 768
           vector_store_name: "Support Knowledge Base"
-          metadata:
-            custom_gen_ai:
-              tags:
-                owner: ml-team
-                domain: support
 
 ---
 # Companion Secrets for providers that require credentials:

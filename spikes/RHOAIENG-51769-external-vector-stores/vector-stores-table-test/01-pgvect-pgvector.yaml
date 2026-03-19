@@ -1,0 +1,68 @@
+# Deploys pgvector2 in the pgvect namespace.
+# This tests a cross-namespace vector store provider scenario where
+# pgvector2.pgvect.svc.cluster.local is referenced from the proj1 gen-ai-aa-vector-stores ConfigMap.
+#
+# Apply with:
+#   kubectl apply -f 01-pgvect-pgvector.yaml
+#
+# After the pod is running, create the vector extension as superuser:
+#   oc exec -n pgvect deployment/pgvector2 -- psql -U postgres -d vectordb -c "CREATE EXTENSION IF NOT EXISTS vector;"
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: pgvect
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: pgvector-credentials-2
+  namespace: pgvect
+type: Opaque
+stringData:
+  password: "vectorpass2"
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: pgvector2
+  namespace: pgvect
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: pgvector2
+  template:
+    metadata:
+      labels:
+        app: pgvector2
+    spec:
+      containers:
+        - name: pgvector2
+          image: quay.io/sclorg/postgresql-16-c9s:latest
+          ports:
+            - containerPort: 5432
+          env:
+            - name: POSTGRESQL_USER
+              value: "vectoruser"
+            - name: POSTGRESQL_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: pgvector-credentials-2
+                  key: password
+            - name: POSTGRESQL_DATABASE
+              value: "vectordb"
+            - name: POSTGRESQL_ADMIN_PASSWORD
+              value: "adminpass"
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: pgvector2
+  namespace: pgvect
+spec:
+  selector:
+    app: pgvector2
+  ports:
+    - port: 5432
+      targetPort: 5432

@@ -1,0 +1,103 @@
+# Defines two pgvector providers and four vector stores covering all embedding model status scenarios.
+#
+# Providers:
+#   - pgvector-provider-1: pgvector in proj1 namespace (pgvector.proj1.svc.cluster.local)
+#   - pgvector-provider-2: pgvector2 in pgvect namespace (pgvector2.pgvect.svc.cluster.local)
+#
+# Vector stores and their expected embedding model status in the UI:
+#   1. "Product Docs RAG Store"                  → not_available ("Missing model" warning)
+#   2. "Granite Embedding RAG Store"             → registered (green check, inline sentence-transformers)
+#   3. "External Embedding RAG Store"            → available (no warning, external endpoint only)
+#   4. "Registered External Embedding RAG Store" → registered (green check, external endpoint + registered in llamastack)
+#
+# Prerequisites:
+#   - pgvector running in proj1 namespace (pgvector.proj1.svc.cluster.local:5432)
+#   - pgvector2 running in pgvect namespace — see 01-pgvect-pgvector.yaml
+#   - gen-ai-aa-external-models applied — see 02-gen-ai-aa-external-models.yaml
+#   - llama-stack-config updated — see 04-llama-stack-config.yaml
+#
+# Apply with:
+#   kubectl apply -f 03-gen-ai-aa-vector-stores.yaml -n proj1
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: pgvector-credentials
+  namespace: proj1
+type: Opaque
+stringData:
+  password: "vectorpass"
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: gen-ai-aa-vector-stores
+  namespace: proj1
+data:
+  config.yaml: |
+    providers:
+      vector_io:
+        - provider_id: pgvector-provider-1
+          provider_type: remote::pgvector
+          config:
+            host: pgvector.proj1.svc.cluster.local
+            port: 5432
+            db: vectordb
+            user: vectoruser
+            distance_metric: COSINE
+            custom_gen_ai:
+              credentials:
+                secretRefs:
+                  - name: pgvector-credentials
+                    key: password
+        - provider_id: pgvector-provider-2
+          provider_type: remote::pgvector
+          config:
+            host: pgvector2.pgvect.svc.cluster.local
+            port: 5432
+            db: vectordb
+            user: vectoruser
+            distance_metric: COSINE
+            custom_gen_ai:
+              credentials:
+                secretRefs:
+                  - name: pgvector-credentials-2
+                    key: password
+
+    registered_resources:
+      vector_stores:
+        # Scenario 1: not_available — embedding model does not exist anywhere
+        - provider_id: pgvector-provider-1
+          vector_store_id: vs_282695f8-7e3e-48da-abac-d81a0aa225a4
+          vector_store_name: "Product Docs RAG Store"
+          embedding_model: non-existent-embedding-model
+          embedding_dimension: 768
+          metadata:
+            description: "Vector store for product documentation"
+
+        # Scenario 2: registered — inline sentence-transformers model registered in llamastack
+        - provider_id: pgvector-provider-2
+          vector_store_id: vs_8a4f1c23-9b2d-41e7-bc35-e72a3fd908c1
+          vector_store_name: "Granite Embedding RAG Store"
+          embedding_model: sentence-transformers/ibm-granite/granite-embedding-125m-english
+          embedding_dimension: 768
+          metadata:
+            description: "Vector store using inline Granite embedding model (sentence-transformers provider)"
+
+        # Scenario 3: available — registered as AI asset endpoint but NOT in llamastack
+        - provider_id: pgvector-provider-1
+          vector_store_id: vs_c3e91f74-2a6b-4d18-a507-f93b2de14c22
+          vector_store_name: "External Embedding RAG Store"
+          embedding_model: test-fake-external-embedding
+          embedding_dimension: 768
+          metadata:
+            description: "Vector store using a fake external embedding model (in allModels only)"
+
+        # Scenario 4: registered — registered as AI asset endpoint AND in llamastack
+        - provider_id: pgvector-provider-1
+          vector_store_id: vs_d7a42e81-5c3f-4b29-9e16-a84f1bc73d05
+          vector_store_name: "Registered External Embedding RAG Store"
+          embedding_model: test-fake-registered-external-embedding
+          embedding_dimension: 768
+          metadata:
+            description: "Vector store using a fake external embedding model registered in both allModels and llamastack"

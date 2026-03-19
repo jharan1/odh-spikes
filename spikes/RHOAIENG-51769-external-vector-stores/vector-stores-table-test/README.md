@@ -60,9 +60,11 @@ Status logic:
 
 ## Notes
 
-- `pgvector-credentials-2` secret must exist in the **pgvect** namespace (where pgvector2 runs),
-  not in proj1. The BFF reads secrets from the namespace where the vector store provider's
-  cluster service lives.
+- In the production flow, the BFF reads secrets referenced in `gen-ai-aa-vector-stores` via
+  `secretRefs` and injects their values into `llama-stack-config` as env vars when creating or
+  updating a playground — the llamastack pod then reads them at runtime. In this local test,
+  `pgvector-credentials-2` is placed in the `pgvect` namespace as a workaround since that
+  injection flow is not yet implemented.
 - The `llama-stack-config` ConfigMap is managed by the LSD operator. The changes in
   `04-llama-stack-config.yaml` add `external-model-provider-2` (a fake remote::vllm provider)
   so that `test-fake-registered-external-embedding` can be registered in llamastack without

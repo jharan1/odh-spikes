@@ -1,0 +1,160 @@
+# Attempts to run milvus v2.6.2 (upmio/milvus:2.6.2) on OpenShift for BFF test 2.
+#
+# Status: WORK IN PROGRESS — milvus 2.6.2 is required because LlamaStack's remote::milvus
+# creates SPARSE_INVERTED_INDEX with metric_type="BM25", which was introduced in Milvus 2.5.
+# Milvus 2.4.x only supports IP metric for sparse indexes and will fail at file upload time.
+#
+# Current blocker:
+#   panic: invalid stats config, cfg: {... l1MinSizeFromIdleTime:0 ...}
+#   github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/shard/stats.NewStatsManager()
+#       /workspace/source/internal/streamingnode/server/wal/interceptors/shard/stats/stats_manager.go:59
+#
+#   This panic fires in the streaming node's stats manager (NOT in rocksmq as previously
+#   thought). It occurs regardless of mq.type (reproduced with both rocksmq and woodpecker).
+#   l1MinSizeFromIdleTime maps to a segment stats config, likely in streamingNode paramtable.
+#   The zero value is treated as invalid and no default appears to be set in this build.
+#
+# Lessons learned getting to this point:
+#
+# 1. upmio/milvus:2.6.2 (amd64) is the only working quay.io-hosted Milvus 2.6.x image found.
+#    - quay.io/katonic/milvus:milvus-v2.6.12 is just Ubuntu 22.04 + tini, no milvus binary.
+#    - milvusdb/milvus images are on Docker Hub and hit rate limits on the cluster.
+#
+# 2. DEPLOY_MODE=STANDALONE env var is REQUIRED. Milvus 2.6.x reads it during Go init()
+#    functions (querycoordv2/params) before roles.Run() can set it. Without it, you get:
+#    "panic: embedded etcd can not be used under distributed mode"
+#
+# 3. MILVUSCONF=/milvus/configs env var (NOT MILVUS_CONF_DIR) tells milvus where to find
+#    milvus.yaml. Mount the ConfigMap as a directory (not subPath) at /milvus/configs.
+#
+# 4. LOCAL_STORAGE_PATH=/var/lib/milvus env var is needed to avoid "failed to mkdir" panic
+#    when the config file is not loaded yet at mkdir time.
+#
+# 5. mq.type: natsmq is NOT valid in 2.6.x (removed). Valid types: default, pulsar, kafka,
+#    rocksmq, woodpecker. Both rocksmq and woodpecker trigger the stats manager panic.
+#
+# 6. anyuid SCC still required:
+#    oc adm policy add-scc-to-user anyuid system:serviceaccount:milvus:default
+#
+# Next steps to investigate:
+# - Find the config key for l1MinSizeFromIdleTime in milvus 2.6.x source:
+#     grep -r "l1MinSizeFromIdleTime\|MinSizeFromIdleTime" in milvus/pkg/v2/mq source
+#   The panic is actually in streamingnode stats, not rocksmq retention — the struct fields
+#   like l1MaxLifetime, l1MaxIdleTime, l1MinSizeFromIdleTime suggest segment L1/L0 compaction
+#   thresholds. Try setting dataCoord.compaction.* or streamingNode.* config values.
+# - Try milvus 2.5.x (e.g. quay.io/upmio/milvus:2.5.x if available) which may not have
+#   this streaming node stats manager panic.
+# - Try mq.type: default to let milvus auto-select.
+#
+# Apply with:
+#   oc adm policy add-scc-to-user anyuid system:serviceaccount:milvus:default
+#   kubectl apply -f 02-milvus-deployment-v262-wip.yaml -n milvus
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: milvus-config
+  namespace: milvus
+data:
+  milvus.yaml: |
+    etcd:
+      use:
+        embed: true
+      data:
+        dir: /var/lib/milvus/etcd
+    common:
+      storageType: local
+    localStorage:
+      path: /var/lib/milvus
+    mq:
+      type: woodpecker
+    woodpecker:
+      client:
+        storage:
+          rootPath: /var/lib/milvus/woodpecker
+    rootCoord:
+      port: 53100
+    proxy:
+      port: 19530
+    queryCoord:
+      port: 19531
+    queryNode:
+      port: 21123
+    indexNode:
+      port: 21121
+    dataCoord:
+      port: 13333
+    dataNode:
+      port: 21124
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: vectordb-milvus
+  namespace: milvus
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: vectordb-milvus
+  template:
+    metadata:
+      labels:
+        app: vectordb-milvus
+    spec:
+      securityContext:
+        runAsUser: 0
+      containers:
+        - name: milvus
+          image: quay.io/upmio/milvus:2.6.2
+          args: ["milvus", "run", "standalone"]
+          env:
+            - name: ETCD_USE_EMBED
+              value: "true"
+            - name: ETCD_DATA_DIR
+              value: /var/lib/milvus/etcd
+            - name: COMMON_STORAGETYPE
+              value: local
+            - name: DEPLOY_MODE
+              value: STANDALONE
+            - name: MILVUSCONF
+              value: /milvus/configs
+            - name: LOCAL_STORAGE_PATH
+              value: /var/lib/milvus
+          ports:
+            - containerPort: 19530
+            - containerPort: 9091
+          volumeMounts:
+            - name: milvus-data
+              mountPath: /var/lib/milvus
+            - name: milvus-config
+              mountPath: /milvus/configs
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: 9091
+            initialDelaySeconds: 30
+            periodSeconds: 10
+            failureThreshold: 6
+      volumes:
+        - name: milvus-data
+          emptyDir: {}
+        - name: milvus-config
+          configMap:
+            name: milvus-config
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: vectordb-milvus
+  namespace: milvus
+spec:
+  selector:
+    app: vectordb-milvus
+  ports:
+    - name: grpc
+      port: 19530
+      targetPort: 19530
+    - name: http
+      port: 9091
+      targetPort: 9091

@@ -133,10 +133,6 @@ registered_resources:
     embedding_dimension: 768
     metadata:
       description: "Vector store for product documentation"
-      custom_gen_ai:
-        tags:
-          owner: platform-team
-          domain: rag
   datasets: []
   scoring_fns: []
   benchmarks: []

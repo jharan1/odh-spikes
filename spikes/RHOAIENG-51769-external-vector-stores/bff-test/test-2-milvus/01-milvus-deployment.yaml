@@ -1,0 +1,126 @@
+# Deploys a standalone milvus instance in the milvus namespace for bff-test-2.
+#
+# Image: quay.io/katonic/milvus:v2.4.23 (quay.io mirror of milvusdb/milvus:v2.4.23)
+# The official milvusdb/milvus image lives on Docker Hub; this mirror avoids pull rate limits.
+#
+# Key lessons from getting this working:
+#
+# 1. The image has no milvus.yaml baked in, so all components default to port 19530 — which
+#    causes rootcoord and datacoord to conflict. A milvus.yaml with explicit per-component
+#    ports must be supplied via a ConfigMap.
+#
+# 2. The binary was compiled without RocksMQ (Rocksmq:false) and uses natsmq as the embedded
+#    MQ. mq.type must be set explicitly in milvus.yaml — the binary does not auto-select it.
+#
+# 3. runAsUser: 0 (anyuid SCC) is required on OpenShift for milvus to write to its data dirs.
+#    Grant with: oc adm policy add-scc-to-user anyuid system:serviceaccount:milvus:default
+#
+# 4. auth is disabled (no token required). For LlamaStack remote::milvus, use token: "".
+#
+# Apply with:
+#   oc adm policy add-scc-to-user anyuid system:serviceaccount:milvus:default
+#   kubectl apply -f 01-milvus-deployment.yaml -n milvus
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: milvus-config
+  namespace: milvus
+data:
+  milvus.yaml: |
+    etcd:
+      use:
+        embed: true
+      data:
+        dir: /var/lib/milvus/etcd
+    localStorage:
+      path: /var/lib/milvus
+    common:
+      storageType: local
+    mq:
+      type: natsmq
+    natsmq:
+      server:
+        port: 4222
+        storeDir: /var/lib/milvus/nats
+    rootCoord:
+      port: 53100
+    proxy:
+      port: 19530
+    queryCoord:
+      port: 19531
+    queryNode:
+      port: 21123
+    indexNode:
+      port: 21121
+    dataCoord:
+      port: 13333
+    dataNode:
+      port: 21124
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: vectordb-milvus
+  namespace: milvus
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: vectordb-milvus
+  template:
+    metadata:
+      labels:
+        app: vectordb-milvus
+    spec:
+      securityContext:
+        runAsUser: 0
+      containers:
+        - name: milvus
+          image: quay.io/katonic/milvus:v2.4.23
+          args: ["milvus", "run", "standalone"]
+          env:
+            - name: ETCD_USE_EMBED
+              value: "true"
+            - name: ETCD_DATA_DIR
+              value: /var/lib/milvus/etcd
+            - name: COMMON_STORAGETYPE
+              value: local
+          ports:
+            - containerPort: 19530
+            - containerPort: 9091
+          volumeMounts:
+            - name: milvus-data
+              mountPath: /var/lib/milvus
+            - name: milvus-config
+              mountPath: /milvus/configs/milvus.yaml
+              subPath: milvus.yaml
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: 9091
+            initialDelaySeconds: 30
+            periodSeconds: 10
+            failureThreshold: 6
+      volumes:
+        - name: milvus-data
+          emptyDir: {}
+        - name: milvus-config
+          configMap:
+            name: milvus-config
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: vectordb-milvus
+  namespace: milvus
+spec:
+  selector:
+    app: vectordb-milvus
+  ports:
+    - name: grpc
+      port: 19530
+      targetPort: 19530
+    - name: http
+      port: 9091
+      targetPort: 9091

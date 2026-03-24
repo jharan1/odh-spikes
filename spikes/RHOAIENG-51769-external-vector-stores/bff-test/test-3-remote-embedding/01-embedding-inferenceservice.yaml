@@ -1,0 +1,85 @@
+# Deploys RedHatAI/granite-embedding-english-r2 as a vLLM embedding InferenceService in proj1.
+#
+# Model switched from nomic-embed-text-v1.5 to granite-embedding-english-r2 because:
+# - quay.io/redhat-ai-services/modelcar-catalog:granite-embedding-english-r2 exists (avoids
+#   Docker Hub rate limits that hit kserve/storage-initializer when using hf:// URIs)
+# - Both are 768-dimensional RedHatAI collection models
+#
+# Key lessons:
+#
+# 1. Use oci:// storageUri (modelcar pattern) to avoid kserve/storage-initializer which is
+#    on Docker Hub and hits unauthenticated pull rate limits on this cluster.
+#
+# 2. --port=8080 must be explicitly set in ServingRuntime args. KServe only auto-injects
+#    --port and --model when args are defined at the InferenceService model.args level,
+#    not when they come from the ServingRuntime. Without it, vLLM defaults to port 8000
+#    and the readiness probe (TCP :8080) never passes.
+#
+# 3. --served-model-name=RedHatAI/granite-embedding-english-r2 is required. The modelcar
+#    image's config.json has _name_or_path: "facebook/opt-125m" (the base architecture),
+#    so without this flag vLLM registers the model as "facebook/opt-125m" and the
+#    /v1/embeddings call with the RedHatAI model ID returns a 404.
+#
+# 4. --task=embed exposes /v1/embeddings. Without it vLLM serves the model as a
+#    chat/completion model only.
+#
+# Apply with:
+#   kubectl apply -f 01-embedding-inferenceservice.yaml -n proj1
+---
+apiVersion: serving.kserve.io/v1alpha1
+kind: ServingRuntime
+metadata:
+  name: granite-embedding-r2
+  namespace: proj1
+  annotations:
+    openshift.io/display-name: vLLM CPU Embedding ServingRuntime for granite-embedding-english-r2
+spec:
+  multiModel: false
+  supportedModelFormats:
+    - name: vLLM
+      autoSelect: true
+  containers:
+    - name: kserve-container
+      image: quay.io/rh-aiservices-bu/vllm-cpu-openai-ubi9:0.3
+      args:
+        - --port=8080
+        - --served-model-name=RedHatAI/granite-embedding-english-r2
+        - --task=embed
+        - --dtype=float32
+      env:
+        - name: HF_HOME
+          value: /tmp/hf_home
+      ports:
+        - containerPort: 8080
+          protocol: TCP
+      resources:
+        requests:
+          cpu: "2"
+          memory: 4Gi
+        limits:
+          cpu: "4"
+          memory: 8Gi
+---
+apiVersion: serving.kserve.io/v1beta1
+kind: InferenceService
+metadata:
+  name: granite-embedding-r2
+  namespace: proj1
+  annotations:
+    serving.kserve.io/deploymentMode: RawDeployment
+spec:
+  predictor:
+    minReplicas: 1
+    maxReplicas: 1
+    model:
+      modelFormat:
+        name: vLLM
+      runtime: granite-embedding-r2
+      storageUri: oci://quay.io/redhat-ai-services/modelcar-catalog:granite-embedding-english-r2
+      resources:
+        requests:
+          cpu: "2"
+          memory: 4Gi
+        limits:
+          cpu: "4"
+          memory: 8Gi

@@ -1,0 +1,1 @@
+Today's weather is sunny with a high of 25°C and a low of 15°C. There is a 10% chance of rain.

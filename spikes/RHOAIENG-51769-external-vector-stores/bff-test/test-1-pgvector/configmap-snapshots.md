@@ -15,7 +15,7 @@ Key points:
   block is **BFF-only metadata** and is stripped before anything is forwarded to LlamaStack.
 - `persistence` section is **required** by LlamaStack's pgvector provider (omitting it causes a crash).
 - `registered_resources.vector_stores` — the stores to register. `embedding_model` references the
-  full LlamaStack model ID (provider-prefixed).
+  model's `provider_model_id` (without provider prefix).
 
 ```yaml
 apiVersion: v1
@@ -49,7 +49,7 @@ data:
         - provider_id: pgvector-bff-provider
           vector_store_id: vs_bff00001-0000-0000-0000-000000000001
           vector_store_name: "BFF Test Knowledge Base"
-          embedding_model: sentence-transformers/ibm-granite/granite-embedding-125m-english
+          embedding_model: ibm-granite/granite-embedding-125m-english
           embedding_dimension: 768
           metadata:
             description: "Test vector store for BFF install endpoint testing using the default embedding model"
@@ -64,8 +64,8 @@ spec that the BFF constructed. LlamaStack reads this on startup.
 
 Key points:
 - `custom_gen_ai` is absent — the BFF stripped it before writing the LSD spec.
-- The pgvector `password` field is `${env.VS_CREDENTIAL_1:=}` — resolved at runtime from the
-  `VS_CREDENTIAL_1` env var injected into the LSD pod as a `SecretKeyRef`.
+- The pgvector `password` field is `${env.VS_CREDENTIAL_PGVECTOR_BFF_PROVIDER_1:=}` — resolved at runtime from the
+  `VS_CREDENTIAL_PGVECTOR_BFF_PROVIDER_1` env var injected into the LSD pod as a `SecretKeyRef`.
 - `registered_resources.vector_stores` contains the entry from the input ConfigMap, with
   `metadata.description` preserved.
 - The default milvus provider is also present (added by the LSD operator for the default vector store).
@@ -123,7 +123,7 @@ data:
           db: vectordb
           distance_metric: COSINE
           host: pgvector2.pgvect.svc.cluster.local
-          password: ${env.VS_CREDENTIAL_1:=}         # resolved from SecretKeyRef at runtime
+          password: ${env.VS_CREDENTIAL_PGVECTOR_BFF_PROVIDER_1:=}         # resolved from SecretKeyRef at runtime
           persistence:
             backend: kv_default
             namespace: vector_io::pgvector-bff-provider
@@ -163,8 +163,8 @@ data:
 gen-ai-aa-vector-stores (admin-managed)
   └── BFF reads on POST /api/v1/lsd/install
         ├── strips custom_gen_ai from provider config
-        ├── replaces password value with ${env.VS_CREDENTIAL_1:=}
-        ├── injects VS_CREDENTIAL_1 env var (SecretKeyRef) into LSD deployment spec
+        ├── replaces password value with ${env.VS_CREDENTIAL_PGVECTOR_BFF_PROVIDER_1:=}
+        ├── injects VS_CREDENTIAL_PGVECTOR_BFF_PROVIDER_1 env var (SecretKeyRef) into LSD deployment spec
         └── writes LSD CRD → operator generates llama-stack-config
                                 └── LlamaStack pod reads on startup
 ```

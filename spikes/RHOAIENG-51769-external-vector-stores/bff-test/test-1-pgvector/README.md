@@ -78,7 +78,7 @@ data:
         - provider_id: pgvector-bff-provider
           vector_store_id: vs_bff00001-0000-0000-0000-000000000001
           vector_store_name: "BFF Test Knowledge Base"
-          embedding_model: sentence-transformers/ibm-granite/granite-embedding-125m-english
+          embedding_model: ibm-granite/granite-embedding-125m-english
           embedding_dimension: 768
           metadata:
             description: "Test vector store for BFF install endpoint testing using the default embedding model"
@@ -130,7 +130,7 @@ curl -s -X POST "http://localhost:8080/api/v1/lsd/install?namespace=proj1" \
 # pgvector provider present, custom_gen_ai absent, password uses env var syntax
 oc get configmap llama-stack-config -n proj1 -o jsonpath='{.data.config\.yaml}' | yq .
 
-# VS_CREDENTIAL_1 injected as SecretKeyRef
+# VS_CREDENTIAL_PGVECTOR_BFF_PROVIDER_1 injected as SecretKeyRef
 oc get deployment lsd-genai-playground -n proj1 \
   -o jsonpath='{.spec.template.spec.containers[0].env}' | jq .
 ```

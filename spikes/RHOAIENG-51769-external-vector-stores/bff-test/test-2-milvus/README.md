@@ -76,7 +76,7 @@ data:
         - provider_id: milvus-bff-provider
           vector_store_id: vs_bff00002-0000-0000-0000-000000000001
           vector_store_name: "BFF Test Knowledge Base (Milvus)"
-          embedding_model: sentence-transformers/ibm-granite/granite-embedding-125m-english
+          embedding_model: ibm-granite/granite-embedding-125m-english
           embedding_dimension: 768
           metadata:
             description: "Test vector store for BFF install endpoint testing using milvus"

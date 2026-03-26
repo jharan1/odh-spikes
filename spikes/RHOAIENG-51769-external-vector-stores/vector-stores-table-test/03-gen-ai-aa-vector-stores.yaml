@@ -79,7 +79,7 @@ data:
         - provider_id: pgvector-provider-2
           vector_store_id: vs_8a4f1c23-9b2d-41e7-bc35-e72a3fd908c1
           vector_store_name: "Granite Embedding RAG Store"
-          embedding_model: sentence-transformers/ibm-granite/granite-embedding-125m-english
+          embedding_model: ibm-granite/granite-embedding-125m-english
           embedding_dimension: 768
           metadata:
             description: "Vector store using inline Granite embedding model (sentence-transformers provider)"

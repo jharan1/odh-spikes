@@ -1,0 +1,27 @@
+kind: ConfigMap
+apiVersion: v1
+metadata:
+  name: gen-ai-aa-custom-model-endpoints
+  namespace: proj1
+data:
+  config.yaml: |
+    providers:
+      inference:
+      - provider_id: endpoint-1
+        provider_type: remote::openai
+        config:
+          base_url: https://api.anthropic.com/v1/
+          allowed_models:
+          - claude-haiku-4-5-20251001
+          custom_gen_ai:
+            api_key:
+              secretRef:
+                name: endpoint-api-key-1
+                key: api_key
+    registered_resources:
+      models:
+      - provider_id: endpoint-1
+        model_id: claude-haiku-4-5-20251001
+        model_type: llm
+        metadata:
+          display_name: Claude Haiku

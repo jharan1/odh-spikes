@@ -1,0 +1,49 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: gen-ai-aa-vector-stores
+  namespace: proj1
+data:
+  config.yaml: |
+    providers:
+      vector_io:
+        - provider_id: pgvector-bff-provider
+          provider_type: remote::pgvector
+          config:
+            host: pgvector2.pgvect.svc.cluster.local
+            port: 5432
+            db: vectordb
+            user: vectoruser
+            distance_metric: COSINE
+            persistence:
+              backend: kv_default
+              namespace: vector_io::pgvector-bff-provider
+            custom_gen_ai:
+              credentials:
+                secretRefs:
+                  - name: pgvector-bff-credentials  # Secret must exist in namespace with key: password
+                    key: password
+
+    registered_resources:
+      vector_stores:
+        - provider_id: pgvector-bff-provider
+          vector_store_id: vs_bff00001-0000-0000-0000-000000000001
+          vector_store_name: "Veldrix Z9 Product Knowledge Base"
+          embedding_model: ibm-granite/granite-embedding-125m-english
+          embedding_dimension: 768
+          metadata:
+            description: "Vector store with Veldrix Z9 product information"
+        - provider_id: pgvector-bff-provider
+          vector_store_id: vs_bff00003-0000-0000-0000-000000000001
+          vector_store_name: "Weather Knowledge Base (Remote Embedding)"
+          embedding_model: RedHatAI/granite-embedding-english-r2
+          embedding_dimension: 768
+          metadata:
+            description: "Vector store with weather information (uses remote granite embedding)"
+        - provider_id: pgvector-bff-provider
+          vector_store_id: vs_bff00004-0000-0000-0000-000000000001
+          vector_store_name: "Mistral Knowledge Base"
+          embedding_model: mistral-embed
+          embedding_dimension: 1024
+          metadata:
+            description: "Vector store using Mistral embedding model"

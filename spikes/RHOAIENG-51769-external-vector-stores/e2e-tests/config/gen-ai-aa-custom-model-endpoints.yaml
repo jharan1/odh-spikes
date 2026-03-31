@@ -1,0 +1,45 @@
+providers:
+  inference:
+  - provider_id: endpoint-1
+    provider_type: remote::openai
+    config:
+      base_url: https://api.anthropic.com/v1/
+      allowed_models:
+      - claude-haiku-4-5-20251001
+      custom_gen_ai:
+        api_key:
+          secretRef:
+            name: endpoint-api-key-1
+            key: api_key
+  - provider_id: mistral-embed-provider
+    provider_type: remote::passthrough
+    config:
+      base_url: https://api.mistral.ai
+      custom_gen_ai:
+        api_key:
+          secretRef:
+            name: mistral-api-key
+            key: api_key
+  - provider_id: granite-embed-provider
+    provider_type: remote::passthrough
+    config:
+      base_url: http://granite-embedding-r2-predictor.proj1.svc.cluster.local
+registered_resources:
+  models:
+  - provider_id: endpoint-1
+    model_id: claude-haiku-4-5-20251001
+    model_type: llm
+    metadata:
+      display_name: Claude Haiku
+  - provider_id: mistral-embed-provider
+    model_id: mistral-embed
+    model_type: embedding
+    metadata:
+      display_name: Mistral Embed
+      embedding_dimension: 1024
+  - provider_id: granite-embed-provider
+    model_id: RedHatAI/granite-embedding-english-r2
+    model_type: embedding
+    metadata:
+      display_name: Granite Embedding R2
+      embedding_dimension: 768

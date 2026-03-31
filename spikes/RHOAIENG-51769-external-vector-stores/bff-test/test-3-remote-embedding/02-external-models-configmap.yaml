@@ -8,14 +8,9 @@ data:
     providers:
       inference:
         - provider_id: granite-embed-provider
-          provider_type: remote::openai
+          provider_type: remote::passthrough
           config:
-            base_url: http://granite-embedding-r2-predictor.proj1.svc.cluster.local/v1
-            custom_gen_ai:
-              api_key:
-                secretRef:
-                  name: granite-embed-api-key
-                  key: api_key
+            base_url: http://granite-embedding-r2-predictor.proj1.svc.cluster.local
 
     registered_resources:
       models:
@@ -23,5 +18,5 @@ data:
           model_id: RedHatAI/granite-embedding-english-r2
           model_type: embedding
           metadata:
-            display_name: Granite Embedding English R2 (RedHatAI)
+            display_name: Granite Embedding R2
             embedding_dimension: 768

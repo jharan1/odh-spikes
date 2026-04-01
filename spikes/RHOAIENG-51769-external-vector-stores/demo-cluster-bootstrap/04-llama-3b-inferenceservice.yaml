@@ -1,0 +1,74 @@
+# Deploys Llama 3.2 3B Instruct as a vLLM CPU InferenceService in demo-vector-stores-e2e.
+# Used as the primary LLM for the Gen AI playground demo.
+#
+# Memory set to 16Gi, CPU to 4 (increased from default 4Gi RAM / 2 CPU — 3B model weights
+# require ~6Gi+ KV cache overhead; 4Gi caused the model to hang at shard loading with 0% progress).
+#
+# --max-model-len=20000: Llama 3.2's max_position_embeddings is 131072 but the KV cache on CPU
+# can only hold ~37440 tokens with 16Gi RAM. Without this flag vLLM crashes on startup with:
+#   "The model's max seq len (131072) is larger than the maximum number of tokens that can be
+#    stored in KV cache. Try increasing VLLM_CPU_KVCACHE_SPACE or decreasing max_model_len."
+# Standard UI deploy uses --dtype=half and --gpu-memory-utilization=0.95; both are GPU-only
+# and are omitted here since this is a CPU ServingRuntime.
+#
+# Apply with:
+#   oc apply -f 04-llama-3b-inferenceservice.yaml
+#
+# Expect ~10-20 min to load on CPU before the pod becomes Ready.
+---
+apiVersion: serving.kserve.io/v1alpha1
+kind: ServingRuntime
+metadata:
+  name: llama-32-3b-instruct
+  namespace: demo-vector-stores-e2e
+  annotations:
+    opendatahub.io/apiProtocol: REST
+    openshift.io/display-name: vLLM CPU ServingRuntime for llama-32-3b-instruct
+spec:
+  multiModel: false
+  supportedModelFormats:
+    - name: vLLM
+      autoSelect: true
+  containers:
+    - name: kserve-container
+      image: quay.io/rh-aiservices-bu/vllm-cpu-openai-ubi9:0.3
+      args:
+        - --port=8080
+        - --model=/mnt/models
+        - --served-model-name={{.Name}}
+        - --max-model-len=20000
+        - --enable-chunked-prefill
+        - --enable-auto-tool-choice
+        - --tool-call-parser=llama3_json
+        - --chat-template=/workspace/vllm/examples/tool_chat_template_llama3.2_json.jinja
+        # Note: --dtype=half and --gpu-memory-utilization are GPU-only; omitted for CPU runtime
+      env:
+        - name: HF_HOME
+          value: /tmp/hf_home
+      ports:
+        - containerPort: 8080
+          protocol: TCP
+---
+apiVersion: serving.kserve.io/v1beta1
+kind: InferenceService
+metadata:
+  name: llama-32-3b-instruct
+  namespace: demo-vector-stores-e2e
+  annotations:
+    serving.kserve.io/deploymentMode: RawDeployment
+spec:
+  predictor:
+    minReplicas: 1
+    maxReplicas: 1
+    model:
+      modelFormat:
+        name: vLLM
+      runtime: llama-32-3b-instruct
+      storageUri: oci://quay.io/redhat-ai-services/modelcar-catalog:llama-3.2-3b-instruct
+      resources:
+        requests:
+          cpu: "2"
+          memory: 12Gi
+        limits:
+          cpu: "4"
+          memory: 16Gi

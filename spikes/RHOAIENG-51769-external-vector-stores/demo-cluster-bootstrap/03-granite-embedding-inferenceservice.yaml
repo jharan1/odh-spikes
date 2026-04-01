@@ -1,0 +1,70 @@
+# Deploys RedHatAI/granite-embedding-english-r2 as a vLLM embedding InferenceService
+# in demo-vector-stores-e2e. Used as the remote embedding model for vs_bff00003.
+#
+# Key notes (same as test-3-remote-embedding/01-embedding-inferenceservice.yaml):
+# - --port=8080 must be set explicitly in ServingRuntime args
+# - --served-model-name=RedHatAI/granite-embedding-english-r2 required (modelcar config.json
+#   has a different _name_or_path, so without this flag the model ID won't match)
+# - --task=embed exposes /v1/embeddings
+# - --dtype=float32 required for CPU runtime
+#
+# Apply with:
+#   oc apply -f 03-granite-embedding-inferenceservice.yaml
+---
+apiVersion: serving.kserve.io/v1alpha1
+kind: ServingRuntime
+metadata:
+  name: granite-embedding-r2
+  namespace: demo-vector-stores-e2e
+  annotations:
+    openshift.io/display-name: vLLM CPU Embedding ServingRuntime for granite-embedding-english-r2
+spec:
+  multiModel: false
+  supportedModelFormats:
+    - name: vLLM
+      autoSelect: true
+  containers:
+    - name: kserve-container
+      image: quay.io/rh-aiservices-bu/vllm-cpu-openai-ubi9:0.3
+      args:
+        - --port=8080
+        - --served-model-name=RedHatAI/granite-embedding-english-r2
+        - --task=embed
+        - --dtype=float32
+      env:
+        - name: HF_HOME
+          value: /tmp/hf_home
+      ports:
+        - containerPort: 8080
+          protocol: TCP
+      resources:
+        requests:
+          cpu: "2"
+          memory: 4Gi
+        limits:
+          cpu: "4"
+          memory: 8Gi
+---
+apiVersion: serving.kserve.io/v1beta1
+kind: InferenceService
+metadata:
+  name: granite-embedding-r2
+  namespace: demo-vector-stores-e2e
+  annotations:
+    serving.kserve.io/deploymentMode: RawDeployment
+spec:
+  predictor:
+    minReplicas: 1
+    maxReplicas: 1
+    model:
+      modelFormat:
+        name: vLLM
+      runtime: granite-embedding-r2
+      storageUri: oci://quay.io/redhat-ai-services/modelcar-catalog:granite-embedding-english-r2
+      resources:
+        requests:
+          cpu: "2"
+          memory: 4Gi
+        limits:
+          cpu: "4"
+          memory: 8Gi

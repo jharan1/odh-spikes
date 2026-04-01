@@ -1,0 +1,52 @@
+
+# Deploys pgvector2 in the pgvect namespace.
+# Used as the backing vector store for all external vector store demo scenarios.
+#
+# Apply with:
+#   oc new-project pgvect  # if namespace doesn't exist
+#   oc apply -f 01-pgvector.yaml
+#
+# After applying, install the pgvector extension:
+#   oc exec -n pgvect deployment/pgvector2 -- psql -U postgres -d vectordb -c "CREATE EXTENSION IF NOT EXISTS vector;"
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: pgvector2
+  namespace: pgvect
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: pgvector2
+  template:
+    metadata:
+      labels:
+        app: pgvector2
+    spec:
+      containers:
+        - name: postgresql
+          image: quay.io/sclorg/postgresql-16-c9s:latest
+          ports:
+            - containerPort: 5432
+          env:
+            - name: POSTGRESQL_DATABASE
+              value: vectordb
+            - name: POSTGRESQL_USER
+              value: vectoruser
+            - name: POSTGRESQL_PASSWORD
+              value: vectorpassword
+            - name: POSTGRESQL_ADMIN_PASSWORD
+              value: adminpassword
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: pgvector2
+  namespace: pgvect
+spec:
+  selector:
+    app: pgvector2
+  ports:
+    - port: 5432
+      targetPort: 5432

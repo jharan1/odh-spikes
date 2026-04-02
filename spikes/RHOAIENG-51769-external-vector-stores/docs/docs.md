@@ -167,7 +167,9 @@ data:
 
 #### Provider connection reference
 
-**PGVector (`remote::pgvector`)**
+All fields under `config` (except `custom_gen_ai`) are passed through directly to LlamaStack. The tables below list the most commonly used fields; for the full set of supported options, see the LlamaStack provider documentation for each backend.
+
+**PGVector (`remote::pgvector`)** — [LlamaStack docs](https://llamastack.github.io/docs/providers/vector_io/remote_pgvector)
 
 | Field | Required | Description |
 |---|---|---|
@@ -177,7 +179,7 @@ data:
 | `user` | No | Database user (if authentication is required alongside the password Secret). |
 | `distance_metric` | No | One of `COSINE` (default), `L2`, `L1`, `INNER_PRODUCT`. |
 
-**Qdrant (`remote::qdrant`)**
+**Qdrant (`remote::qdrant`)** — [LlamaStack docs](https://llamastack.github.io/docs/providers/vector_io/remote_qdrant)
 
 | Field | Required | Description |
 |---|---|---|
@@ -186,7 +188,7 @@ data:
 | `grpc_port` | No | gRPC port (default `6334`). |
 | `prefer_grpc` | No | Use gRPC instead of REST (`true`/`false`). |
 
-**Milvus (`remote::milvus`)**
+**Milvus (`remote::milvus`)** — [LlamaStack docs](https://llamastack.github.io/docs/providers/vector_io/remote_milvus)
 
 | Field | Required | Description |
 |---|---|---|

@@ -12,7 +12,7 @@ External vector stores let you surface pre-populated vector databases—PGVector
   - Milvus (`remote::milvus`)
 - The vector store (collection) is pre-populated with embeddings.
 - You know the embedding model that was used to generate the stored embeddings. A custom model endpoint for that same model must be registered in the project (with the exception of `ibm-granite/granite-embedding-125m-english` model, which is available by default in the Llamastack playground instance).
-- The `externalVectorStores` feature flag is set to `true` in the `OdhDashboardConfig` CR. Contact your cluster administrator if external vector stores are not visible in the UI.
+- `externalVectorStores: true` is set under `spec > dashboardConfig` in the `OdhDashboardConfig` custom resource. Contact your cluster administrator if external vector stores are not visible in the UI.
 
 ---
 

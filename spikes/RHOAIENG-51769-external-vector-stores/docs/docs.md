@@ -1,67 +1,58 @@
-= External Vector Stores in the Gen AI Playground
+# External Vector Stores in the Gen AI Playground
 
-External vector stores let you surface pre-populated vector databases—PGVector, Qdrant, or Milvus—as selectable knowledge sources for RAG in the Gen AI Playground. Platform engineers register vector stores by creating a ConfigMap in the project namespace; AI engineers then select a vector store from the *Knowledge* tab or the *AI Assets* page without ever seeing database credentials or connection details.
+External vector stores let you surface pre-populated vector databases—PGVector, Qdrant, or Milvus—as selectable knowledge sources for RAG in the Gen AI Playground. Platform engineers register vector stores by creating a ConfigMap in the project namespace; AI engineers then select a vector store from the **Knowledge** tab or the **AI Assets** page without ever seeing database credentials or connection details.
 
-[NOTE]
-====
-In RHOAI 3.4, you can enable one external vector store per chat pane. Document upload and ingestion into external vector stores are not supported through the Playground; data must be pre-populated through external pipelines or tools before registration.
-====
+> **Note:** In RHOAI 3.4, you can enable one external vector store per chat pane. Document upload and ingestion into external vector stores are not supported through the Playground; data must be pre-populated through external pipelines or tools before registration.
 
 ---
 
-== For Platform Engineers/Admins: Registering External Vector Stores
+## For Platform Engineers/Admins: Registering External Vector Stores
 
-=== Prerequisites
+### Prerequisites
 
-* You have cluster administrator or namespace administrator access to the target project.
-* A vector database of one of the supported types is running and reachable from the cluster:
-** PGVector (`remote::pgvector`)
-** Qdrant (`remote::qdrant`)
-** Milvus (`remote::milvus`)
-* The vector database is pre-populated with embeddings. The Gen AI Playground does not ingest or re-index data.
-* You know the embedding model that was used to generate the stored embeddings. An InferenceService or custom model endpoint for that same model must be registered in the project.
-* The `disableExternalVectorStores` feature flag is set to `false` (or omitted) in the `OdhDashboardConfig` CR. Contact your cluster administrator if external vector stores are not visible to AI engineers.
+- You have cluster administrator or namespace administrator access to the target project.
+- A vector database of one of the supported types is running and reachable from the cluster:
+  - PGVector (`remote::pgvector`)
+  - Qdrant (`remote::qdrant`)
+  - Milvus (`remote::milvus`)
+- The vector store (collection) is pre-populated with embeddings. The Gen AI Playground does not ingest or re-index data.
+- You know the embedding model that was used to generate the stored embeddings. An InferenceService or custom model endpoint for that same model must be registered in the project.
+- The `disableExternalVectorStores` feature flag is set to `false` (or omitted) in the `OdhDashboardConfig` CR. Contact your cluster administrator if external vector stores are not visible to AI engineers.
 
-=== Step 1 — Create Secrets for database credentials (if required)
+### Step 1 — Create Secrets for database credentials (if required)
 
 If your vector database requires authentication, create a Kubernetes Secret in the same namespace as the project. The BFF reads these secrets at install time to inject credentials into the LlamaStack configuration; credentials are never sent to the browser.
 
-.PGVector example
-[source,bash]
-----
+**PGVector example**
+```bash
 oc create secret generic pgvector-credentials -n <your-project> \
   --from-literal=password=<your-pgvector-password>
-----
+```
 
-.Qdrant example
-[source,bash]
-----
+**Qdrant example**
+```bash
 oc create secret generic qdrant-credentials -n <your-project> \
   --from-literal=api_key=<your-qdrant-api-key>
-----
+```
 
-.Milvus example
-[source,bash]
-----
+**Milvus example**
+```bash
 oc create secret generic milvus-credentials -n <your-project> \
   --from-literal=token=<your-milvus-token>
-----
+```
 
-=== Step 2 — Create the `gen-ai-aa-vector-stores` ConfigMap
+### Step 2 — Create the `gen-ai-aa-vector-stores` ConfigMap
 
 Create a ConfigMap named exactly `gen-ai-aa-vector-stores` in the project namespace. The ConfigMap has a single data key `config.yaml` with two top-level sections:
 
-* `providers.vector_io` — connection details for each vector database (never exposed to the frontend)
-* `registered_resources.vector_stores` — one entry per collection or table that AI engineers can select
+- `providers.vector_io` — connection details for each vector database (never exposed to the frontend)
+- `registered_resources.vector_stores` — one entry per collection or table that AI engineers can select
 
-[IMPORTANT]
-====
-Multiple vector stores can reference the same provider (for example, two separate PGVector tables in the same database). Each vector store entry must have a unique `vector_store_id`.
-====
+> **Important:** Multiple vector stores can reference the same provider (for example, two separate PGVector tables in the same database). Each vector store entry must have a unique `vector_store_id`.
 
-.Example ConfigMap with PGVector, Milvus (no credentials), Milvus (with token), and Qdrant
-[source,yaml]
-----
+**Example ConfigMap with PGVector, Milvus (no credentials), Milvus (with token), and Qdrant**
+
+```yaml
 apiVersion: v1
 kind: ConfigMap
 metadata:
@@ -159,107 +150,79 @@ data:
           embedding_model: ibm-granite/granite-embedding-125m-english
           embedding_dimension: 768
           vector_store_name: "Support Knowledge Base"
-----
+```
 
-[cols="1,1,3", options="header"]
-|===
-| Field | Required | Description
+#### ConfigMap field reference
 
-| `provider_id`
-| Yes
-| Unique identifier for the provider. Referenced by `registered_resources.vector_stores[].provider_id`.
+| Field | Required | Description |
+|---|---|---|
+| `provider_id` | Yes | Unique identifier for the provider. Referenced by `registered_resources.vector_stores[].provider_id`. |
+| `provider_type` | Yes | One of `remote::pgvector`, `remote::qdrant`, `remote::milvus`. |
+| `config` | Yes | Provider-specific connection settings. See provider reference tables below. |
+| `custom_gen_ai.credentials.secretRefs` | No | List of `{name, key}` references to Kubernetes Secrets holding credentials. Omit entirely if no authentication is required. |
+| `vector_store_id` | Yes | A unique identifier for this collection or table. Must not change after the LSD is installed—LlamaStack persists this ID internally. |
+| `vector_store_name` | Yes | Display name shown in the UI. |
+| `embedding_model` | Yes | The model identifier (provider_model_id) used when the data was embedded. Must match an available custom model endpoint or InferenceService in the namespace. |
+| `embedding_dimension` | Yes | Dimension of the embedding vectors (for example, `768`). |
+| `metadata.description` | No | Human-readable description shown in the AI Assets vector stores table. |
 
-| `provider_type`
-| Yes
-| One of `remote::pgvector`, `remote::qdrant`, `remote::milvus`.
+#### Provider connection reference
 
-| `config`
-| Yes
-| Provider-specific connection settings. See provider reference tables below.
+**PGVector (`remote::pgvector`)**
 
-| `custom_gen_ai.credentials.secretRefs`
-| No
-| List of `{name, key}` references to Kubernetes Secrets holding credentials. Omit entirely if no authentication is required.
+| Field | Required | Description |
+|---|---|---|
+| `host` | Yes | Hostname or Kubernetes service name of the PostgreSQL instance. |
+| `port` | Yes | PostgreSQL port (typically `5432`). |
+| `db` | Yes | Database name. |
+| `user` | No | Database user (if authentication is required alongside the password Secret). |
+| `distance_metric` | No | One of `COSINE` (default), `L2`, `L1`, `INNER_PRODUCT`. |
 
-| `vector_store_id`
-| Yes
-| A unique identifier for this collection or table. Must not change after the LSD is installed—LlamaStack persists this ID internally.
+**Qdrant (`remote::qdrant`)**
 
-| `vector_store_name`
-| Yes
-| Display name shown in the UI.
+| Field | Required | Description |
+|---|---|---|
+| `url` | Yes | Base URL of the Qdrant REST API. |
+| `port` | No | REST port (default `6333`). |
+| `grpc_port` | No | gRPC port (default `6334`). |
+| `prefer_grpc` | No | Use gRPC instead of REST (`true`/`false`). |
 
-| `embedding_model`
-| Yes
-| The model identifier (provider_model_id) used when the data was embedded. Must match an available custom model endpoint or InferenceService in the namespace.
+**Milvus (`remote::milvus`)**
 
-| `embedding_dimension`
-| Yes
-| Dimension of the embedding vectors (for example, `768`).
+| Field | Required | Description |
+|---|---|---|
+| `uri` | Yes | Full URI of the Milvus endpoint (for example, `http://milvus.svc.cluster.local:19530`). |
 
-| `metadata.description`
-| No
-| Human-readable description shown in the AI Assets vector stores table.
-|===
+### Step 3 — Install/Reinstall the LlamaStack Distribution
 
-==== Provider connection reference
-
-.PGVector (`remote::pgvector`)
-[cols="1,1,3", options="header"]
-|===
-| Field | Required | Description
-| `host` | Yes | Hostname or Kubernetes service name of the PostgreSQL instance.
-| `port` | Yes | PostgreSQL port (typically `5432`).
-| `db` | Yes | Database name.
-| `user` | No | Database user (if authentication is required alongside the password Secret).
-| `distance_metric` | No | One of `COSINE` (default), `L2`, `L1`, `INNER_PRODUCT`.
-|===
-
-.Qdrant (`remote::qdrant`)
-[cols="1,1,3", options="header"]
-|===
-| Field | Required | Description
-| `url` | Yes | Base URL of the Qdrant REST API.
-| `port` | No | REST port (default `6333`).
-| `grpc_port` | No | gRPC port (default `6334`).
-| `prefer_grpc` | No | Use gRPC instead of REST (`true`/`false`).
-|===
-
-.Milvus (`remote::milvus`)
-[cols="1,1,3", options="header"]
-|===
-| Field | Required | Description
-| `uri` | Yes | Full URI of the Milvus endpoint (for example, `http://milvus.svc.cluster.local:19530`).
-|===
-
-=== Step 3 — Install/Reinstall the LlamaStack Distribution
-
-. Ensure the externalVectorStores feature flag is enabled.
-. From the {productname-short} dashboard, click *Gen AI studio* -> *AI asset endpoints*, then select the Vector Stores tab.
-. In this tab you can view the Vector Stores defined in the `gen-ai-aa-vector-stores` ConfigMap, and you can identify if a Vector Store can be selected for install.
-. If the "Add to playground" link is enabled for a Vector Store, you can click it to open the Configure Playground modal. In the modal you must select the Vector Store you want to install, if you need to change the models selected, you can do that in the first page of the modal. Finally hit Configure to install the playground with the selected model(s) and Vector Store(s).
+1. Ensure the `externalVectorStores` feature flag is enabled.
+2. From the dashboard, click **Gen AI studio** → **AI asset endpoints**, then select the **Vector Stores** tab.
+3. In this tab you can view the vector stores defined in the `gen-ai-aa-vector-stores` ConfigMap, and identify which vector stores can be selected for install.
+4. If the **Add to playground** link is enabled for a vector store, click it to open the **Configure Playground** modal. In the modal, select the vector store you want to install. If you need to change the models selected, you can do that on the first page of the modal. Click **Configure** to install the playground with the selected model(s) and vector store(s).
 
 ---
 
-== For AI Engineers: Using External Vector Stores
+### Step 4 — Using External Vector Stores in the Gen-AI Playground
 
-=== Prerequisites
+### Prerequisites
 
-* A platform engineer has created the `gen-ai-aa-vector-stores` ConfigMap in your project namespace.
-* The playground has been installed with the Vector Store(s) you want to use.
-* The external vector stores feature flag is enabled.
+- A platform engineer has created the `gen-ai-aa-vector-stores` ConfigMap in your project namespace.
+- The playground has been installed with the vector store(s) you want to use.
+- The `externalVectorStores` feature flag is enabled.
 
-. From the {productname-short} dashboard, click *Gen AI Studio* -> *Playground*.
-. In the *Playground* interface, click the *Knowledge* tab.
-. Select *External vector store*.
-. From the dropdown, select the vector store to use for this chat session. Click the rag-toggle-switch to enable the Knowledge feature.
-. In the chat input field, ask a question related to the content indexed in the vector store.
-+
+### Procedure
+
+1. From the dashboard, click **Gen AI Studio** → **Playground**.
+2. In the **Playground** interface, click the **Knowledge** tab.
+3. Select **External vector store**.
+4. From the dropdown, select the vector store to use for this chat session. Click the "Toggle RAG mode" switch to enable the Knowledge feature.
+5. In the chat input field, ask a question related to the content indexed in the vector store.
+
 The model retrieves relevant context from the selected vector store and uses it to generate a grounded response.
 
-=== Verification
+### Verification
 
-* The model response references information from the vector store rather than relying solely on its pre-trained knowledge.
-* If you ask a question outside the scope of the indexed content, the model indicates that relevant information was not found, or falls back to its general knowledge.
-* In the *AI Assets* -> *Vector Stores* tab, the status of the vector store you selected shows as *Registered*.
-* If the Playground fails to install after selecting a vector store, check the error message displayed in the UI for details about the misconfigured store. Pass this information to your platform engineer.
+- The model response references information from the vector store rather than relying solely on its pre-trained knowledge.
+- If you ask a question outside the scope of the indexed content, the model indicates that relevant information was not found, or falls back to its general knowledge.
+- In the **AI Assets** → **Vector Stores** tab, the status of the vector store you selected shows as **Registered**.
+- If the Playground fails to install after selecting a vector store, check the error message displayed in the UI for details about the misconfigured store. Pass this information to your platform engineer.

@@ -167,32 +167,11 @@ data:
 
 #### Provider connection reference
 
-All fields under `config` (except `custom_gen_ai`) are passed through directly to LlamaStack. The tables below list the most commonly used fields; for the full set of supported options, see the LlamaStack provider documentation for each backend.
+All fields under `config` (except `custom_gen_ai`) are passed through directly to LlamaStack. For the full set of supported connection options for each backend, refer to the LlamaStack provider documentation:
 
-**PGVector (`remote::pgvector`)** — [LlamaStack docs](https://llamastack.github.io/docs/providers/vector_io/remote_pgvector)
-
-| Field | Required | Description |
-|---|---|---|
-| `host` | Yes | Hostname or Kubernetes service name of the PostgreSQL instance. |
-| `port` | Yes | PostgreSQL port (typically `5432`). |
-| `db` | Yes | Database name. |
-| `user` | No | Database user (if authentication is required alongside the password Secret). |
-| `distance_metric` | No | One of `COSINE` (default), `L2`, `L1`, `INNER_PRODUCT`. |
-
-**Qdrant (`remote::qdrant`)** — [LlamaStack docs](https://llamastack.github.io/docs/providers/vector_io/remote_qdrant)
-
-| Field | Required | Description |
-|---|---|---|
-| `url` | Yes | Base URL of the Qdrant REST API. |
-| `port` | No | REST port (default `6333`). |
-| `grpc_port` | No | gRPC port (default `6334`). |
-| `prefer_grpc` | No | Use gRPC instead of REST (`true`/`false`). |
-
-**Milvus (`remote::milvus`)** — [LlamaStack docs](https://llamastack.github.io/docs/providers/vector_io/remote_milvus)
-
-| Field | Required | Description |
-|---|---|---|
-| `uri` | Yes | Full URI of the Milvus endpoint (for example, `http://milvus.svc.cluster.local:19530`). |
+- [PGVector (`remote::pgvector`)](https://llamastack.github.io/docs/providers/vector_io/remote_pgvector)
+- [Qdrant (`remote::qdrant`)](https://llamastack.github.io/docs/providers/vector_io/remote_qdrant)
+- [Milvus (`remote::milvus`)](https://llamastack.github.io/docs/providers/vector_io/remote_milvus)
 
 ### Step 3 — Install the Playground with the vector store
 

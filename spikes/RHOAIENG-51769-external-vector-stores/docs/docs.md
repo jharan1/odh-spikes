@@ -1,8 +1,6 @@
 # External Vector Stores in the Gen AI Playground
 
-External vector stores let you surface pre-populated vector databases—PGVector, Qdrant, or Milvus—as selectable knowledge sources for RAG in the Gen AI Playground. Platform engineers register vector stores by creating a ConfigMap in the project namespace; AI engineers then select a vector store from the **Knowledge** tab or the **AI Assets** page without ever seeing database credentials or connection details.
-
-> **Note:** In RHOAI 3.4, you can enable one external vector store per chat pane. Document upload and ingestion into external vector stores are not supported through the Playground; data must be pre-populated through external pipelines or tools before registration.
+External vector stores let you surface pre-populated vector databases—PGVector, Qdrant, or Milvus—as selectable knowledge sources for RAG in the Gen AI Playground.
 
 ---
 

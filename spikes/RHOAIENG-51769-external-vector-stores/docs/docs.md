@@ -197,4 +197,4 @@ The model retrieves relevant context from the selected vector store and uses it 
 
 - The model response references information from the vector store rather than relying solely on its pre-trained knowledge.
 - If you ask a question outside the scope of the indexed content, the model indicates that relevant information was not found, or falls back to its general knowledge.
-- In the **AI Assets** → **Vector Stores** tab, the status of the vector store you selected shows as **Registered**.
+- In the **AI Assets** → **Vector Stores** tab, the status of a vector store that has been installed in the llamastack instance should show as **Registered**.

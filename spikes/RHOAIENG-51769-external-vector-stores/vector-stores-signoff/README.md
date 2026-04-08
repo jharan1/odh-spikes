@@ -51,7 +51,11 @@ The qdrant collection (`vs_signoff-qdrant-001`) is created automatically by the 
 
 ## Content
 
-Source content ingested into the vector stores is in the `content/` folder.
+Source content ingested into the vector stores is in the `content/` folder:
+
+- `team-pgvector.txt` — data ingested into the pgvector store (names suffixed with `P`)
+- `team-qdrant.txt` — data ingested into the qdrant store (names suffixed with `Q`)
+- `example-team-data.txt` — original unsuffixed source data
 
 ## Ingestion
 

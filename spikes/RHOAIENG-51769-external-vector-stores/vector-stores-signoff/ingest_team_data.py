@@ -1,27 +1,66 @@
 """
-Ingest team data into pgvector and qdrant vector stores for vector-stores-signoff namespace.
+Ingest team data into pgvector, qdrant, and/or milvus vector stores for vector-stores-signoff namespace.
 
 Usage:
-    python3 ingest_team_data.py <openai_api_key> <pg_pod>
+    python3 ingest_team_data.py <openai_api_key> <pg_pod> [options]
 
-Where <pg_pod> is the pgvector pod name in the pgvect namespace.
-The qdrant collection is created automatically if it does not exist.
+Options:
+  --stores pgvector qdrant milvus   Which stores to ingest into (default: all three)
+  --llamastack-url URL              LlamaStack API URL for milvus ingestion
+                                    (default: http://localhost:8321)
+
+Examples:
+  # Ingest all stores
+  python3 ingest_team_data.py "$OPENAI_KEY" "$PG_POD"
+
+  # Ingest milvus only (requires port-forward)
+  python3 ingest_team_data.py "$OPENAI_KEY" "$PG_POD" --stores milvus
+
+  # Ingest pgvector and qdrant only
+  python3 ingest_team_data.py "$OPENAI_KEY" "$PG_POD" --stores pgvector qdrant
+
+For milvus ingestion, port-forward the LlamaStack service first:
+  oc port-forward svc/lsd-genai-playground 8321:8321 -n vector-stores-signoff
 """
-import uuid
-import time
+import argparse
+import hashlib
 import json
 import subprocess
 import sys
+import time
 import urllib.request
+import uuid
 
-OPENAI_API_KEY = sys.argv[1]
-PG_POD = sys.argv[2]
+parser = argparse.ArgumentParser(description="Ingest team data into vector stores")
+parser.add_argument("openai_api_key", help="OpenAI API key")
+parser.add_argument("pg_pod", help="pgvector pod name in the pgvect namespace")
+parser.add_argument(
+    "--stores",
+    nargs="+",
+    choices=["pgvector", "qdrant", "milvus"],
+    default=["pgvector", "qdrant", "milvus"],
+    metavar="STORE",
+    help="Stores to ingest into: pgvector, qdrant, milvus (default: all)",
+)
+parser.add_argument(
+    "--llamastack-url",
+    default="http://localhost:8321",
+    help="LlamaStack API URL for milvus ingestion (default: http://localhost:8321)",
+)
+args = parser.parse_args()
+
+OPENAI_API_KEY = args.openai_api_key
+PG_POD         = args.pg_pod
+LLAMASTACK_URL = args.llamastack_url
+STORES         = set(args.stores)
 
 PGVECTOR_TEXT = "Scrum team: JohnP, JaneP, FredP, JoeP"
 QDRANT_TEXT   = "Scrum team: JohnQ, JaneQ, FredQ, JoeQ"
+MILVUS_TEXT   = "Scrum team: JohnM, JaneM, FredM, JoeM"
 
 PGVECTOR_VS_TABLE = "vs_vs_signoff_pgvector_001"
 QDRANT_VS_ID      = "vs_signoff-qdrant-001"
+MILVUS_VS_ID      = "vs_signoff-milvus-001"
 QDRANT_HOST       = "qdrant.qdrant.svc.cluster.local"
 QDRANT_PORT       = 6333
 EMBEDDING_MODEL   = "text-embedding-3-small"
@@ -54,13 +93,13 @@ def insert_pgvector(text, embedding):
         "metadata": {
             "file_id": file_id, "chunk_id": chunk_id, "filename": "team-pgvector.txt",
             "document_id": file_id, "token_count": 10,
-            "chunk_tokenizer": "tiktoken:cl100k_base", "metadata_token_count": 5
+            "chunk_tokenizer": "tiktoken:cl100k_base", "metadata_token_count": 5,
         },
         "chunk_metadata": {
             "source": None, "chunk_id": chunk_id, "document_id": file_id,
             "chunk_window": "0-10", "chunk_tokenizer": "tiktoken:cl100k_base",
             "created_timestamp": now, "updated_timestamp": now,
-            "content_token_count": 10, "metadata_token_count": 5
+            "content_token_count": 10, "metadata_token_count": 5,
         },
         "embedding_model": f"openai-provider/{EMBEDDING_MODEL}",
         "embedding_dimension": EMBEDDING_DIM,
@@ -123,7 +162,6 @@ def ensure_qdrant_collection():
 
 def convert_qdrant_id(chunk_id):
     """Mirrors LlamaStack's convert_id — SHA-256 hash of 'qdrant_id:<chunk_id>', formatted as UUID."""
-    import hashlib
     hash_input = f"qdrant_id:{chunk_id}".encode()
     sha256_hash = hashlib.sha256(hash_input).hexdigest()
     return f"{sha256_hash[:8]}-{sha256_hash[8:12]}-{sha256_hash[12:16]}-{sha256_hash[16:20]}-{sha256_hash[20:32]}"
@@ -134,7 +172,6 @@ def insert_qdrant(text, embedding):
     chunk_id = str(uuid.uuid4())
     file_id = "file-team-qdrant"
     now = int(time.time())
-    # chunk_content must match LlamaStack's EmbeddedChunk.model_dump() structure
     chunk_content = {
         "content": text,
         "chunk_id": chunk_id,
@@ -172,30 +209,96 @@ def insert_qdrant(text, embedding):
     return rc
 
 
-print("=== Computing embeddings via OpenAI ===")
-print(f"pgvector text: {PGVECTOR_TEXT}")
-embedding_p = get_embedding(PGVECTOR_TEXT)
-print(f"Got embedding, dim={len(embedding_p)}")
+def insert_milvus(text, embedding):
+    """Insert a pre-embedded chunk into milvus via the LlamaStack vector-io API.
 
-print(f"qdrant text: {QDRANT_TEXT}")
-embedding_q = get_embedding(QDRANT_TEXT)
-print(f"Got embedding, dim={len(embedding_q)}")
+    Requires the LlamaStack service to be accessible at LLAMASTACK_URL.
+    Use oc port-forward to expose it locally before running.
+    """
+    chunk_id = str(uuid.uuid4())
+    file_id = "file-team-milvus"
+    now = int(time.time())
+    chunk = {
+        "content": text,
+        "chunk_id": chunk_id,
+        "metadata": {
+            "file_id": file_id, "chunk_id": chunk_id, "filename": "team-milvus.txt",
+            "document_id": file_id, "token_count": 10,
+            "chunk_tokenizer": "tiktoken:cl100k_base", "metadata_token_count": 5,
+        },
+        "chunk_metadata": {
+            "source": None, "chunk_id": chunk_id, "document_id": file_id,
+            "chunk_window": "0-10", "chunk_tokenizer": "tiktoken:cl100k_base",
+            "created_timestamp": now, "updated_timestamp": now,
+            "content_token_count": 10, "metadata_token_count": 5,
+        },
+        "embedding_model": f"openai-provider/{EMBEDDING_MODEL}",
+        "embedding_dimension": EMBEDDING_DIM,
+        "embedding": embedding,
+    }
+    data = json.dumps({
+        "vector_store_id": MILVUS_VS_ID,
+        "chunks": [chunk],
+    }).encode()
+    req = urllib.request.Request(
+        f"{LLAMASTACK_URL}/v1/vector-io/insert",
+        data=data,
+        headers={"Content-Type": "application/json"},
+        method="POST",
+    )
+    resp = urllib.request.urlopen(req)
+    return resp.status
 
-print("\n=== Inserting into pgvector ===")
-rc = insert_pgvector(PGVECTOR_TEXT, embedding_p)
-if rc == 0:
-    print("pgvector insert OK")
-else:
-    print("pgvector insert FAILED")
-    sys.exit(rc)
 
-print("\n=== Inserting into qdrant ===")
-ensure_qdrant_collection()
-rc = insert_qdrant(QDRANT_TEXT, embedding_q)
-if rc == 0:
-    print("qdrant insert OK")
-else:
-    print("qdrant insert FAILED")
-    sys.exit(rc)
+# --- Compute embeddings only for stores that need them ---
+
+embedding_p = embedding_q = None
+
+if "pgvector" in STORES or "qdrant" in STORES:
+    print("=== Computing embeddings via OpenAI ===")
+
+if "pgvector" in STORES:
+    print(f"pgvector text: {PGVECTOR_TEXT}")
+    embedding_p = get_embedding(PGVECTOR_TEXT)
+    print(f"Got embedding, dim={len(embedding_p)}")
+
+if "qdrant" in STORES:
+    print(f"qdrant text: {QDRANT_TEXT}")
+    embedding_q = get_embedding(QDRANT_TEXT)
+    print(f"Got embedding, dim={len(embedding_q)}")
+
+# --- Insert ---
+
+if "pgvector" in STORES:
+    print("\n=== Inserting into pgvector ===")
+    rc = insert_pgvector(PGVECTOR_TEXT, embedding_p)
+    if rc == 0:
+        print("pgvector insert OK")
+    else:
+        print("pgvector insert FAILED")
+        sys.exit(rc)
+
+if "qdrant" in STORES:
+    print("\n=== Inserting into qdrant ===")
+    ensure_qdrant_collection()
+    rc = insert_qdrant(QDRANT_TEXT, embedding_q)
+    if rc == 0:
+        print("qdrant insert OK")
+    else:
+        print("qdrant insert FAILED")
+        sys.exit(rc)
+
+if "milvus" in STORES:
+    print("\n=== Inserting into milvus (via LlamaStack API) ===")
+    print(f"LlamaStack URL: {LLAMASTACK_URL}")
+    print(f"milvus text: {MILVUS_TEXT}")
+    embedding_m = get_embedding(MILVUS_TEXT)
+    print(f"Got embedding, dim={len(embedding_m)}")
+    status = insert_milvus(MILVUS_TEXT, embedding_m)
+    if status in (200, 204):
+        print("milvus insert OK")
+    else:
+        print(f"milvus insert FAILED (status {status})")
+        sys.exit(1)
 
 print("\nDone.")

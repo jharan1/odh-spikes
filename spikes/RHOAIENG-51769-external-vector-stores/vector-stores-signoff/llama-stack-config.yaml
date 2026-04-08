@@ -22,10 +22,6 @@ data:
       - provider_id: sentence-transformers
         provider_type: inline::sentence-transformers
         config: {}
-      - provider_id: anthropic-provider
-        provider_type: remote::openai
-        config:
-          base_url: https://api.anthropic.com/v1
       - provider_id: gemini-25-flash-provider
         provider_type: remote::openai
         config:
@@ -34,6 +30,10 @@ data:
         provider_type: remote::passthrough
         config:
           base_url: https://api.openai.com
+      - provider_id: anthropic-provider
+        provider_type: remote::openai
+        config:
+          base_url: https://api.anthropic.com/v1
       vector_io:
       - provider_id: milvus
         provider_type: inline::milvus
@@ -42,13 +42,21 @@ data:
           persistence:
             backend: kv_default
             namespace: vector_io::milvus
+      - provider_id: milvus-provider
+        provider_type: remote::milvus
+        config:
+          persistence:
+            backend: kv_default
+            namespace: vector_io::milvus-provider
+          token: ${env.VS_CREDENTIAL_MILVUS_PROVIDER_1:=}
+          uri: https://in03-9ec1c85c7842d37.serverless.aws-eu-central-1.cloud.zilliz.com
       - provider_id: pgvector-provider
         provider_type: remote::pgvector
         config:
           db: vectordb
           distance_metric: COSINE
           host: pgvector2.pgvect.svc.cluster.local
-          password: ${env.VS_CREDENTIAL_PGVECTOR_PROVIDER_1:=}
+          password: ${env.VS_CREDENTIAL_PGVECTOR_PROVIDER_2:=}
           persistence:
             backend: kv_default
             namespace: vector_io::pgvector-bff-provider
@@ -140,12 +148,6 @@ data:
         model_type: embedding
         metadata:
           embedding_dimension: 768
-      - provider_id: anthropic-provider
-        model_id: claude-haiku-4-5-20251001
-        model_type: llm
-        metadata:
-          display_name: Claude Haiku
-          use_cases: General Chat
       - provider_id: gemini-25-flash-provider
         model_id: models/gemini-2.5-flash
         model_type: llm
@@ -158,8 +160,21 @@ data:
         metadata:
           display_name: OpenAI Embeddings
           embedding_dimension: 1536
+      - provider_id: anthropic-provider
+        model_id: claude-haiku-4-5-20251001
+        model_type: llm
+        metadata:
+          display_name: Claude Haiku
+          use_cases: General Chat
       shields: []
       vector_stores:
+      - vector_store_id: vs_signoff-milvus-001
+        embedding_model: openai-provider/text-embedding-3-small
+        embedding_dimension: 1536
+        provider_id: milvus-provider
+        vector_store_name: Example Team Data (text-embedding-3-small · milvus)
+        metadata:
+          description: Signoff test vector store using Zilliz Cloud (remote milvus) backend
       - vector_store_id: vs_signoff-pgvector-001
         embedding_model: openai-provider/text-embedding-3-small
         embedding_dimension: 1536

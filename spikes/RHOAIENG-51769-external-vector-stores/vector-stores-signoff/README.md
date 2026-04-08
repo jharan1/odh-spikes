@@ -36,10 +36,18 @@ oc create secret generic zilliz-api-key --from-literal=token=<token> -n vector-s
 ## Infrastructure
 
 ### pgvector
-Pre-existing on the cluster in the `pgvect` namespace (`pgvector2` deployment).
+Deployed to the `pgvect` namespace (`pgvector2` deployment). This is a shared cluster resource — deploy once per cluster, not per namespace. Config saved in `pgvector-deployment.yaml`.
+
+To deploy from scratch:
+```bash
+oc new-project pgvect
+oc apply -f pgvector-deployment.yaml
+oc exec -n pgvect deployment/pgvector2 -- psql -U postgres -d vectordb -c "CREATE EXTENSION IF NOT EXISTS vector;"
+```
+
 - Host: `pgvector2.pgvect.svc.cluster.local:5432`
 - DB: `vectordb`, user: `vectoruser`
-- Tables: `vs_vs_signoff_pgvector_001` (pgvector store)
+- Table used by this namespace: `vs_vs_signoff_pgvector_001`
 
 ### qdrant
 Deployed to the `qdrant` namespace. Config saved in `qdrant-deployment.yaml`.

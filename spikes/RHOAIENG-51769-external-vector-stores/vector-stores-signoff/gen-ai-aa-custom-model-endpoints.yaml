@@ -1,0 +1,62 @@
+kind: ConfigMap
+apiVersion: v1
+metadata:
+  name: gen-ai-aa-custom-model-endpoints
+  namespace: vector-stores-signoff
+data:
+  config.yaml: |
+    providers:
+      inference:
+      - provider_id: gemini-25-flash-provider
+        provider_type: remote::openai
+        config:
+          base_url: https://generativelanguage.googleapis.com/v1beta/openai
+          allowed_models:
+          - models/gemini-2.5-flash
+          custom_gen_ai:
+            api_key:
+              secretRef:
+                name: gemini-api-key
+                key: api_key
+      - provider_id: openai-provider
+        provider_type: remote::passthrough
+        config:
+          base_url: https://api.openai.com
+          custom_gen_ai:
+            api_key:
+              secretRef:
+                name: openai-api-key
+                key: api_key
+      - provider_id: anthropic-provider
+        provider_type: remote::openai
+        config:
+          base_url: https://api.anthropic.com/v1
+          allowed_models:
+          - claude-haiku-4-5-20251001
+          custom_gen_ai:
+            api_key:
+              secretRef:
+                name: anthropic-api-key
+                key: api_key
+    registered_resources:
+      models:
+      - provider_id: gemini-25-flash-provider
+        model_id: models/gemini-2.5-flash
+        model_type: llm
+        metadata:
+          display_name: Gemini 2.5 Flash
+          custom_gen_ai:
+            use_cases: General Chat
+      - provider_id: openai-provider
+        model_id: text-embedding-3-small
+        model_type: embedding
+        metadata:
+          display_name: OpenAI Embeddings
+          embedding_dimension: 1536
+      - provider_id: anthropic-provider
+        model_id: claude-haiku-4-5-20251001
+        model_type: llm
+        metadata:
+          display_name: Claude Haiku
+          custom_gen_ai:
+            use_cases: General Chat

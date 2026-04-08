@@ -1,0 +1,181 @@
+kind: ConfigMap
+apiVersion: v1
+metadata:
+  name: llama-stack-config
+  namespace: vector-stores-signoff
+data:
+  config.yaml: |
+    # Llama Stack Configuration
+    version: "2"
+    distro_name: rh
+    apis:
+    - responses
+    - datasetio
+    - files
+    - inference
+    - safety
+    - scoring
+    - tool_runtime
+    - vector_io
+    providers:
+      inference:
+      - provider_id: sentence-transformers
+        provider_type: inline::sentence-transformers
+        config: {}
+      - provider_id: anthropic-provider
+        provider_type: remote::openai
+        config:
+          base_url: https://api.anthropic.com/v1
+      - provider_id: gemini-25-flash-provider
+        provider_type: remote::openai
+        config:
+          base_url: https://generativelanguage.googleapis.com/v1beta/openai
+      - provider_id: openai-provider
+        provider_type: remote::passthrough
+        config:
+          base_url: https://api.openai.com
+      vector_io:
+      - provider_id: milvus
+        provider_type: inline::milvus
+        config:
+          db_path: /opt/app-root/src/.llama/distributions/rh/milvus.db
+          persistence:
+            backend: kv_default
+            namespace: vector_io::milvus
+      - provider_id: pgvector-provider
+        provider_type: remote::pgvector
+        config:
+          db: vectordb
+          distance_metric: COSINE
+          host: pgvector2.pgvect.svc.cluster.local
+          password: ${env.VS_CREDENTIAL_PGVECTOR_PROVIDER_1:=}
+          persistence:
+            backend: kv_default
+            namespace: vector_io::pgvector-bff-provider
+          port: 5432
+          user: vectoruser
+      - provider_id: qdrant-provider
+        provider_type: remote::qdrant
+        config:
+          host: qdrant.qdrant.svc.cluster.local
+          persistence:
+            backend: kv_default
+            namespace: vector_io::qdrant-provider
+          port: 6333
+      responses:
+      - provider_id: builtin
+        provider_type: inline::builtin
+        config:
+          persistence:
+            agent_state:
+              backend: kv_default
+              namespace: agents
+            responses:
+              backend: sql_default
+              max_write_queue_size: 10000
+              num_writers: 4
+              table_name: responses
+      eval: []
+      files:
+      - provider_id: meta-reference-files
+        provider_type: inline::localfs
+        config:
+          metadata_store:
+            backend: sql_default
+            table_name: files_metadata
+          storage_dir: /opt/app-root/src/.llama/distributions/rh/files
+      datasetio:
+      - provider_id: huggingface
+        provider_type: remote::huggingface
+        config:
+          kvstore:
+            backend: kv_default
+            namespace: datasetio::huggingface
+      scoring:
+      - provider_id: basic
+        provider_type: inline::basic
+        config: {}
+      - provider_id: llm-as-judge
+        provider_type: inline::llm-as-judge
+        config: {}
+      tool_runtime:
+      - provider_id: file-search
+        provider_type: inline::file-search
+        config: {}
+      - provider_id: model-context-protocol
+        provider_type: remote::model-context-protocol
+        config: {}
+      safety: []
+    metadata_store:
+      type: sqlite
+      db_path: /opt/app-root/src/.llama/distributions/rh/inference_store.db
+    storage:
+      backends:
+        kv_default:
+          db_path: /opt/app-root/src/.llama/distributions/rh/kvstore.db
+          type: kv_sqlite
+        sql_default:
+          db_path: /opt/app-root/src/.llama/distributions/rh/sql_store.db
+          type: sql_sqlite
+      stores:
+        conversations:
+          backend: sql_default
+          table_name: openai_conversations
+        inference:
+          backend: sql_default
+          table_name: inference_store
+        metadata:
+          backend: kv_default
+          namespace: registry
+    vector_stores:
+      default_provider_id: milvus
+      default_embedding_model:
+        provider_id: sentence-transformers
+        model_id: ibm-granite/granite-embedding-125m-english
+    registered_resources:
+      models:
+      - provider_id: sentence-transformers
+        model_id: sentence-transformers/ibm-granite/granite-embedding-125m-english
+        provider_model_id: ibm-granite/granite-embedding-125m-english
+        model_type: embedding
+        metadata:
+          embedding_dimension: 768
+      - provider_id: anthropic-provider
+        model_id: claude-haiku-4-5-20251001
+        model_type: llm
+        metadata:
+          display_name: Claude Haiku
+          use_cases: General Chat
+      - provider_id: gemini-25-flash-provider
+        model_id: models/gemini-2.5-flash
+        model_type: llm
+        metadata:
+          display_name: Gemini 2.5 Flash
+          use_cases: General Chat
+      - provider_id: openai-provider
+        model_id: text-embedding-3-small
+        model_type: embedding
+        metadata:
+          display_name: OpenAI Embeddings
+          embedding_dimension: 1536
+      shields: []
+      vector_stores:
+      - vector_store_id: vs_signoff-pgvector-001
+        embedding_model: openai-provider/text-embedding-3-small
+        embedding_dimension: 1536
+        provider_id: pgvector-provider
+        vector_store_name: Example Team Data (text-embedding-3-small · pgvector)
+        metadata:
+          description: Signoff test vector store using pgvector backend
+      - vector_store_id: vs_signoff-qdrant-001
+        embedding_model: openai-provider/text-embedding-3-small
+        embedding_dimension: 1536
+        provider_id: qdrant-provider
+        vector_store_name: Example Team Data (text-embedding-3-small · qdrant)
+        metadata:
+          description: Signoff test vector store using qdrant backend
+      datasets: []
+      scoring_fns: []
+      benchmarks: []
+    server:
+      port: 8321

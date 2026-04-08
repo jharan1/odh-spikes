@@ -1,0 +1,49 @@
+kind: ConfigMap
+apiVersion: v1
+metadata:
+  name: gen-ai-aa-vector-stores
+  namespace: vector-stores-signoff
+data:
+  config.yaml: |
+    providers:
+      vector_io:
+      - provider_id: pgvector-provider
+        provider_type: remote::pgvector
+        config:
+          host: pgvector2.pgvect.svc.cluster.local
+          port: 5432
+          db: vectordb
+          user: vectoruser
+          distance_metric: COSINE
+          persistence:
+            backend: kv_default
+            namespace: vector_io::pgvector-bff-provider
+          custom_gen_ai:
+            credentials:
+              secretRefs:
+                - name: pgvector-bff-credentials
+                  key: password
+      - provider_id: qdrant-provider
+        provider_type: remote::qdrant
+        config:
+          host: qdrant.qdrant.svc.cluster.local
+          port: 6333
+          persistence:
+            backend: kv_default
+            namespace: vector_io::qdrant-provider
+    registered_resources:
+      vector_stores:
+      - provider_id: pgvector-provider
+        vector_store_id: vs_signoff-pgvector-001
+        vector_store_name: "Example Team Data (text-embedding-3-small · pgvector)"
+        embedding_model: text-embedding-3-small
+        embedding_dimension: 1536
+        metadata:
+          description: "Signoff test vector store using pgvector backend"
+      - provider_id: qdrant-provider
+        vector_store_id: vs_signoff-qdrant-001
+        vector_store_name: "Example Team Data (text-embedding-3-small · qdrant)"
+        embedding_model: text-embedding-3-small
+        embedding_dimension: 1536
+        metadata:
+          description: "Signoff test vector store using qdrant backend"

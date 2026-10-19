@@ -1,0 +1,151 @@
+# Gemini 2.5 Flash-Lite chat LLM for the playground (same model as tracing/gemini-proxy):
+# an LLMInferenceService running litellm -> Google, consumed via the MaaS path.
+#
+# Contains (in this order):
+#   1. ConfigMap litellm-config        - litellm model routing (gemini-2.5-flash-lite)
+#   2. LLMInferenceService gemini-proxy - litellm pod on the maas-default-gateway
+#   3. MaaSModelRef gemini-proxy        - registers the model in the MaaS catalog
+#
+# Prerequisites (one-off, cluster-admin, in addition to this file):
+#   - Secret gemini-secret (key: api-key) in this namespace with the Google API key
+#     (same key as 02-gemini-embedding-api-key.yaml — create it from that key)
+#   - The MaaS governance pairing must cover the new model. Patch the existing dev
+#     resources in models-as-a-service (mirrors how tracing/gemini-proxy is wired):
+#
+#       oc patch maassubscription gemini-subscription -n models-as-a-service --type json \
+#         -p '[{"op":"add","path":"/spec/modelRefs/-","value":{"name":"gemini-proxy","namespace":"embedding-e2e-100933","tokenRateLimits":[{"limit":10000,"window":"1m"}]}}]'
+#       oc patch maasauthpolicy gemini-access -n models-as-a-service --type json \
+#         -p '[{"op":"add","path":"/spec/modelRefs/-","value":{"name":"gemini-proxy","namespace":"embedding-e2e-100933"}}]'
+#
+#     Wait for MaaSModelRef Ready + the model to appear in the catalog:
+#       oc get maasmodelref -n embedding-e2e-100933 -w   # PHASE Ready
+#
+# Why MaaS and not model_source_type=namespace:
+#   The BFF's namespace-model resolution for LLMInferenceServices picks the
+#   gateway-internal address (maas-default-gateway-openshift-default...svc), which the
+#   OpenShift router rejects with a TLS connection reset (unknown SNI) — every chat
+#   request fails with 502 "connection reset by peer". The MaaS path resolves through
+#   the MaaS BFF catalog to the external maas gateway URL (valid SNI) with an ephemeral
+#   token, which works. This mirrors how the tracing namespace consumes its gemini-proxy.
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: litellm-config
+  namespace: embedding-e2e-100933
+data:
+  litellm-config.yaml: |
+    model_list:
+    - model_name: gemini-2.5-flash-lite
+      litellm_params:
+        model: gemini/gemini-2.5-flash-lite
+        api_key: os.environ/GEMINI_API_KEY
+    - model_name: gemini-proxy
+      litellm_params:
+        model: gemini/gemini-2.5-flash-lite
+        api_key: os.environ/GEMINI_API_KEY
+    - model_name: gemini/gemini-2.5-flash-lite
+      litellm_params:
+        model: gemini/gemini-2.5-flash-lite
+        api_key: os.environ/GEMINI_API_KEY
+    litellm_settings:
+      drop_params: true
+      success_callback: []
+      failure_callback: []
+---
+apiVersion: serving.kserve.io/v1alpha2
+kind: LLMInferenceService
+metadata:
+  name: gemini-proxy
+  namespace: embedding-e2e-100933
+  labels:
+    opendatahub.io/dashboard: "true"
+spec:
+  model:
+    name: gemini-proxy
+    uri: hf://sshleifer/tiny-gpt2
+  replicas: 1
+  router:
+    gateway:
+      refs:
+      - name: maas-default-gateway
+        namespace: openshift-ingress
+    route: {}
+  template:
+    containers:
+    - name: main
+      image: ghcr.io/berriai/litellm:main-latest
+      command:
+      - litellm
+      args:
+      - --port
+      - "8000"
+      - --config
+      - /config/litellm-config.yaml
+      - --ssl_certfile_path
+      - /var/run/kserve/tls/tls.crt
+      - --ssl_keyfile_path
+      - /var/run/kserve/tls/tls.key
+      env:
+      - name: GEMINI_API_KEY
+        valueFrom:
+          secretKeyRef:
+            key: api-key
+            name: gemini-secret
+      - name: POD_NAME
+        valueFrom:
+          fieldRef:
+            apiVersion: v1
+            fieldPath: metadata.name
+      - name: POD_NAMESPACE
+        valueFrom:
+          fieldRef:
+            apiVersion: v1
+            fieldPath: metadata.namespace
+      - name: LITELLM_DANGEROUSLY_PERMIT_WEAK_OR_UNSET_MASTER_KEY
+        value: "true"
+      ports:
+      - containerPort: 8000
+        name: https
+        protocol: TCP
+      readinessProbe:
+        httpGet:
+          path: /health/readiness
+          port: https
+          scheme: HTTPS
+        initialDelaySeconds: 10
+        periodSeconds: 10
+        timeoutSeconds: 5
+      livenessProbe:
+        httpGet:
+          path: /health/liveliness
+          port: https
+          scheme: HTTPS
+        initialDelaySeconds: 30
+        periodSeconds: 30
+        timeoutSeconds: 5
+      volumeMounts:
+      - mountPath: /config
+        name: config
+      - mountPath: /var/run/kserve/tls
+        name: tls-certs
+        readOnly: true
+    volumes:
+    - configMap:
+        name: litellm-config
+      name: config
+---
+apiVersion: maas.opendatahub.io/v1alpha1
+kind: MaaSModelRef
+metadata:
+  name: gemini-proxy
+  namespace: embedding-e2e-100933
+  labels:
+    opendatahub.io/dashboard: "true"
+  annotations:
+    openshift.io/display-name: Gemini 2.5 Flash-Lite (E2E)
+    openshift.io/description: Google Gemini through a LiteLLM adapter (embedding E2E test copy)
+spec:
+  modelRef:
+    kind: LLMInferenceService
+    name: gemini-proxy

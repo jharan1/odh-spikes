@@ -21,6 +21,7 @@ TOKEN="${TOKEN:-$(oc whoami -t)}"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 MODELS='[
+  {"model_name": "publishers/embedding-e2e-100933/models/gemini-proxy", "model_source_type": "maas"},
   {"model_name": "gemini-embedding-001", "model_source_type": "custom_endpoint", "model_type": "embedding", "embedding_dimension": 3072},
   {"model_name": "granite-embedding-keyless", "model_source_type": "custom_endpoint", "model_type": "embedding", "embedding_dimension": 768},
   {"model_name": "granite-embedding-r2", "model_source_type": "namespace", "model_type": "embedding", "embedding_dimension": 768}

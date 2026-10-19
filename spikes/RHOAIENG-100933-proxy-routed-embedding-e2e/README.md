@@ -34,6 +34,14 @@ declaration) and direct (namespace model). The model IDs differ
 (`granite-embedding-keyless` vs `granite-embedding-r2`) so that
 `buildEmbeddingModelLookup` can't confuse the two stores.
 
+A chat **LLM** — the same Gemini 2.5 Flash-Lite as the `tracing` namespace's
+`gemini-proxy` — is deployed alongside (see `06-llmisvc-gemini-proxy.yaml`) so the
+full RAG chat flow (`/v1/responses` + `file_search`) can be tested end to end. It
+runs as an LLMInferenceService (litellm → Google) registered in the MaaS catalog via
+a MaaSModelRef, and is consumed through the **MaaS path**
+(`model_source_type: "maas"` + the `gemini-subscription` subscription) — the same
+way `tracing` consumes its copy.
+
 ## Architecture
 
 ```
@@ -46,6 +54,9 @@ embedding-e2e-100933 namespace
 ├── ConfigMap: gen-ai-aa-custom-model-endpoints ← keyed Gemini + keyless granite providers
 ├── ConfigMap: gen-ai-aa-vector-stores          ← 3 pgvector-backed stores, one per model
 ├── genai-pgvector (auto-provisioned by the BFF install, pgvector credentials Secret)
+├── gemini-proxy (LLMInferenceService: litellm → Google gemini-2.5-flash-lite)
+│     + litellm-config ConfigMap + gemini-secret + MaaSModelRef (MaaS catalog entry)
+│     consumed as: publishers/embedding-e2e-100933/models/gemini-proxy (MaaS path)
 └── lsd-genai-playground (OGXServer) — generated llama-stack-config:
       models:
         genai-bff-proxy/gemini-embedding-001        (A — proxy-routed, THE FIX)
@@ -62,7 +73,16 @@ Query-time flows being exercised:
 ```
 A: playground -> genai-bff-proxy -> BFF genai-proxy (JWT) -> Google (Secret-sourced key)
 B: playground -> genai-bff-proxy -> BFF genai-proxy (JWT) -> ISVC (no auth header)
-C: playground -> vllm-inference-3 -> ISVC direct (no BFF involved)
+C: playground -> vllm-inference-N  -> ISVC direct (no BFF involved)
+```
+
+Chat flow (LLM leg, same request as the file_search leg):
+
+```
+BFF /lsd/responses (JWT) -> playground /v1/responses (x-ogx-provider-data = JWT)
+  -> file_search -> query_chunks -> store embedding model (A/B/C above)
+  -> LLM: genai-bff-proxy -> BFF chat proxy -> MaaS gateway (ephemeral token)
+            -> litellm (gemini-proxy) -> Google gemini-2.5-flash-lite
 ```
 
 ## Prerequisites
@@ -103,17 +123,27 @@ oc exec -n $NAMESPACE $POD -c kserve-container -- curl -s localhost:8080/v1/embe
 # 4/5. ConfigMaps: custom model endpoints (keyed + keyless) and the three vector stores
 oc apply -f 04-custom-model-endpoints-cm.yaml -f 05-vector-stores-cm.yaml
 
-# 6. Install the playground via the BFF API (two-phase, see script header for why)
+# 6. Chat LLM: Gemini 2.5 Flash-Lite (litellm) LLMInferenceService + MaaSModelRef,
+#    plus the one-off MaaS subscription/authpolicy patches (see file header)
+oc apply -f 06-llmisvc-gemini-proxy.yaml
+oc wait --for=condition=Ready llminferenceservice/gemini-proxy -n $NAMESPACE --timeout=300s
+# then apply the two oc patch commands from the 06 file header and wait for:
+oc wait --for=condition=Ready maasmodelref/gemini-proxy -n $NAMESPACE --timeout=300s
+
+# 7. Install the playground via the BFF API (two-phase, see script header for why)
 ./install-playground.sh
 
-# 7. Ingest the weather test chunk into all three stores (pre-computed embeddings)
+# 8. Ingest the weather test chunk into all three stores (pre-computed embeddings)
 ./ingest-weather.sh
 
-# 8. Query all three stores through the file_search code path
+# 9. Query all three stores through the file_search code path
 ./query-stores.sh
 
-# 9. Prove per-request Secret resolution on the keyed path
+# 10. Prove per-request Secret resolution on the keyed path
 ./negative-test-keyed.sh
+
+# 11. Full RAG chat E2E over all three stores (LLM + file_search + citations)
+./chat-test.sh
 ```
 
 ## Expected results
@@ -133,6 +163,16 @@ after restoring, the query succeeds again. Combined with the playground pod
 holding no Google credentials, this proves per-request credential resolution
 through the proxy.
 
+**`chat-test.sh`** (full RAG chat): for each store, `/lsd/responses` with the
+Gemini Flash-Lite MaaS model + `vector_store_ids` → `file_search_call`
+completes with 1 retrieved chunk (scores: gemini ≈3.3, granite ≈10.1) → the
+answer quotes the weather content with `file_citation` annotations. Notes:
+- The small flash-lite model needs an explicit prompt ("Search the knowledge
+  base: …") to reliably invoke file_search; a bare "What is the weather
+  today?" sometimes skips the tool.
+- The model intermittently returns an empty final message — retrieval (the
+  part under test) succeeds on every run.
+
 ### Verified run
 
 2026-10-19 on `jhrhoai-jenk` (RHOAI 3.6.0), BFF image
@@ -142,18 +182,25 @@ through the proxy.
 |---|---|
 | Generated config: keyed CE model under `genai-bff-proxy`, no direct provider | ✅ |
 | Generated config: keyless CE model under `genai-bff-proxy` (identical shape) | ✅ |
-| Generated config: namespace ISVC model under `vllm-inference-3` (unchanged) | ✅ |
+| Generated config: namespace ISVC model under `vllm-inference-N` (unchanged) | ✅ |
 | Query keyed store (Gemini) — chunk retrieved | ✅ |
 | Query keyless CE store (granite via proxy) — chunk retrieved | ✅ |
 | Query namespace ISVC store (granite direct) — chunk retrieved | ✅ |
 | Playground logs free of `Failed to search vector store` | ✅ |
 | Negative test: corrupt key → 400 `Please pass a valid API key`; restore → works | ✅ |
+| Chat E2E per store: `file_search_call` + 1 chunk + weather answer w/ citations | ✅ (3/3 retrieval; flash-lite message text intermittent — see notes) |
 | Go unit tests (`internal/integrations/kubernetes/...`) | ✅ |
 
-Not covered here (by design): chat-level `/v1/responses` + file_search E2E —
-it needs an LLM registered in the playground; the `/v1/vector-io/query` path
-used above is the same retrieval code path file_search executes, and
-provider-data propagation is covered in the bug doc.
+### Coverage notes
+
+- Chat-level `/v1/responses` + file_search E2E **is** covered by `chat-test.sh`
+  (added after the initial verification run — see the table above).
+- The chat LLM is consumed via the MaaS path, not `model_source_type: namespace`:
+  the BFF's namespace resolution for LLMInferenceServices picks the
+  gateway-internal address, which the OpenShift router rejects (TLS reset on
+  unknown SNI) → every chat request 502s. See the troubleshooting table. The
+  MaaS path (MaaSModelRef + subscription + ephemeral token) is the working
+  consumption route — same as the `tracing` namespace uses.
 
 ## Key implementation details (why things are the way they are)
 
@@ -199,6 +246,10 @@ provider-data propagation is covered in the bug doc.
 | Install 400: `credential secret "genai-pgvector-credentials" not found` | You skipped phase 1 — the vector store validation runs before pgvector provisioning. Run the two-phase install. |
 | Install 400: `OGXServer already exists in namespace; recreate it before adding vector stores` | Run the reconfigure-delete (`preserve_vector_store: true`) then reinstall — `install-playground.sh` phase 2a. |
 | Query returns 0 chunks for ALL stores | Probably an empty/invalid JWT in `x-ogx-provider-data` (the BFF proxy then 401s). Use `oc whoami -t`. |
+| Chat 502: `connection reset by peer` calling `maas-default-gateway-openshift-default...svc` | Namespace-model resolution for LLMInferenceServices uses the gateway-internal URL; the OpenShift router resets TLS with unknown SNI. Consume the model via the MaaS path instead (`06-llmisvc-gemini-proxy.yaml` + subscription patches). |
+| MaaSModelRef stuck `Pending` — "No active subscription and auth policy pairing found" | The MaaS governance pairing needs BOTH the subscription modelRef AND a MaaSAuthPolicy modelRef for the model — patch both (see the 06 file header). |
+| Chat answers without store content / no `file_search_call` | gemini-2.5-flash-lite sometimes skips the tool on vague prompts — use "Search the knowledge base: …". Verify retrieval separately with `query-stores.sh`. |
+| Chat `file_search_call` completed but empty message text | Intermittent empty output from the small flash-lite model. Retrieval (the part under test) still succeeded — re-run. |
 
 ## Cleanup
 
@@ -217,7 +268,9 @@ oc delete namespace embedding-e2e-100933
 | `03-isvc-granite.yaml` | granite embedding ISVC (vLLM CPU, dual served names, /dev/shm, HF overrides) |
 | `04-custom-model-endpoints-cm.yaml` | `gen-ai-aa-custom-model-endpoints`: keyed Gemini + keyless granite providers |
 | `05-vector-stores-cm.yaml` | `gen-ai-aa-vector-stores`: three pgvector-backed stores |
-| `install-playground.sh` | two-phase BFF install + generated-config assertions |
+| `06-llmisvc-gemini-proxy.yaml` | Gemini 2.5 Flash-Lite chat LLM: litellm-config + LLMInferenceService + MaaSModelRef (MaaS path) |
+| `install-playground.sh` | two-phase BFF install (chat LLM + 3 embedding models + stores) + config-shape assertions |
 | `ingest-weather.sh` | compute embeddings (Google + ISVC) and insert the weather chunk into each store |
 | `query-stores.sh` | query all three stores through the file_search code path + log check |
 | `negative-test-keyed.sh` | corrupt/restore the API key Secret to prove per-request resolution |
+| `chat-test.sh` | full RAG chat E2E per store: `/lsd/responses` + file_search + citations |

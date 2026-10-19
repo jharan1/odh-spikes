@@ -1,0 +1,48 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: gen-ai-aa-vector-stores
+  namespace: embedding-e2e-100933
+data:
+  config.yaml: |
+    providers:
+      vector_io:
+      - provider_id: pgvector-e2e-provider
+        provider_type: remote::pgvector
+        config:
+          host: genai-pgvector.embedding-e2e-100933.svc.cluster.local
+          port: 5432
+          db: vectordb
+          user: vectoruser
+          distance_metric: COSINE
+          persistence:
+            backend: kv_default
+            namespace: vector_io::pgvector-e2e-provider
+          custom_gen_ai:
+            credentials:
+              secretRefs:
+                - name: genai-pgvector-credentials
+                  key: password
+    registered_resources:
+      vector_stores:
+      - provider_id: pgvector-e2e-provider
+        vector_store_id: vs-e2e-gemini-keyed
+        vector_store_name: "E2E Weather KB (gemini-embedding-001, keyed custom endpoint)"
+        embedding_model: gemini-embedding-001
+        embedding_dimension: 3072
+        metadata:
+          description: "Keyed external embedding model via Google Gemini - verifies proxy-routed credentials"
+      - provider_id: pgvector-e2e-provider
+        vector_store_id: vs-e2e-granite-keyless-ce
+        vector_store_name: "E2E Weather KB (granite-embedding-keyless, keyless custom endpoint)"
+        embedding_model: granite-embedding-keyless
+        embedding_dimension: 768
+        metadata:
+          description: "Keyless in-cluster embedding model via custom endpoint - verifies proxy-routed keyless flow"
+      - provider_id: pgvector-e2e-provider
+        vector_store_id: vs-e2e-granite-isvc
+        vector_store_name: "E2E Weather KB (granite-embedding-r2, namespace ISVC)"
+        embedding_model: granite-embedding-r2
+        embedding_dimension: 768
+        metadata:
+          description: "Namespace embedding model served by vLLM ISVC - verifies unchanged static vLLM provider path"

@@ -27,12 +27,14 @@ resolves the real endpoint + credentials per request.
 | A | `gemini-embedding-001` (3072d) | custom endpoint → Google | **keyed** (Secret ref) | the fix: proxy routes + resolves the Secret-sourced API key |
 | B | `granite-embedding-keyless` (768d) | custom endpoint → in-cluster ISVC | **keyless** | the scope decision: keyless custom endpoints take the same proxy path |
 | C | `granite-embedding-r2` (768d) | **namespace ISVC** (vLLM) | keyless (JWT) | no regression: namespace models keep the static `remote::vllm` provider |
+| D | `RedHatAI/granite-embedding-english-r2` (768d) | custom endpoint → in-cluster ISVC | keyless | the follow-up fix: namespaced (HF-style) model IDs are preserved verbatim through the proxy (no first-slash truncation) |
 
-B and C deliberately share one vLLM ISVC (it serves two model names) — the
-*same granite model* reached two ways: through the proxy (custom endpoint
-declaration) and direct (namespace model). The model IDs differ
-(`granite-embedding-keyless` vs `granite-embedding-r2`) so that
-`buildEmbeddingModelLookup` can't confuse the two stores.
+B and C deliberately share one vLLM ISVC (it serves three names) — the
+*same granite model* reached multiple ways: through the proxy (custom endpoint
+declaration, bare and namespaced IDs) and direct (namespace model). The model
+IDs differ (`granite-embedding-keyless` vs `RedHatAI/granite-embedding-english-r2`
+vs `granite-embedding-r2`) so that `buildEmbeddingModelLookup` can't confuse
+the stores.
 
 A chat **LLM** — the same Gemini 2.5 Flash-Lite as the `tracing` namespace's
 `gemini-proxy` — is deployed alongside (see `06-llmisvc-gemini-proxy.yaml`) so the
@@ -48,24 +50,29 @@ way `tracing` consumes its copy.
 embedding-e2e-100933 namespace
 ├── granite-embedding-r2 (kserve InferenceService, RawDeployment)
 │     └── vLLM CPU pod: RedHatAI/granite-embedding-english-r2
-│         serves BOTH names: granite-embedding-r2 + granite-embedding-keyless
+│         serves ALL THREE names: granite-embedding-r2 + granite-embedding-keyless
+│         + RedHatAI/granite-embedding-english-r2
 │         (keyless http://...predictor...:8080 — nothing to authenticate with)
 ├── Secret: gemini-embedding-api-key            ← Google API key (NOT committed)
 ├── ConfigMap: gen-ai-aa-custom-model-endpoints ← keyed Gemini + keyless granite providers
-├── ConfigMap: gen-ai-aa-vector-stores          ← 3 pgvector-backed stores, one per model
+│                                               (2 granite models: bare + namespaced IDs)
+├── ConfigMap: gen-ai-aa-vector-stores          ← 4 pgvector-backed stores, one per model
 ├── genai-pgvector (auto-provisioned by the BFF install, pgvector credentials Secret)
 ├── gemini-proxy (LLMInferenceService: litellm → Google gemini-2.5-flash-lite)
 │     + litellm-config ConfigMap + gemini-secret + MaaSModelRef (MaaS catalog entry)
 │     consumed as: publishers/embedding-e2e-100933/models/gemini-proxy (MaaS path)
 └── lsd-genai-playground (OGXServer) — generated llama-stack-config:
       models:
-        genai-bff-proxy/gemini-embedding-001        (A — proxy-routed, THE FIX)
-        genai-bff-proxy/granite-embedding-keyless   (B — proxy-routed)
-        vllm-inference-3/granite-embedding-r2       (C — static direct provider, unchanged)
+        genai-bff-proxy/gemini-embedding-001                   (A — proxy-routed, THE FIX)
+        genai-bff-proxy/granite-embedding-keyless              (B — proxy-routed)
+        vllm-inference-N/granite-embedding-r2                  (C — static direct provider, unchanged;
+                                                              N = position in the install model list — 4 in the verified run below)
+        genai-bff-proxy/RedHatAI/granite-embedding-english-r2  (D — proxy-routed, namespaced ID)
       vector_stores:
-        vs-e2e-gemini-keyed        -> genai-bff-proxy/gemini-embedding-001
-        vs-e2e-granite-keyless-ce  -> genai-bff-proxy/granite-embedding-keyless
-        vs-e2e-granite-isvc        -> vllm-inference-3/granite-embedding-r2
+        vs-e2e-gemini-keyed          -> genai-bff-proxy/gemini-embedding-001
+        vs-e2e-granite-keyless-ce    -> genai-bff-proxy/granite-embedding-keyless
+        vs-e2e-granite-isvc          -> vllm-inference-N/granite-embedding-r2
+        vs-e2e-granite-namespaced-ce -> genai-bff-proxy/RedHatAI/granite-embedding-english-r2
 ```
 
 Query-time flows being exercised:
@@ -74,6 +81,9 @@ Query-time flows being exercised:
 A: playground -> genai-bff-proxy -> BFF genai-proxy (JWT) -> Google (Secret-sourced key)
 B: playground -> genai-bff-proxy -> BFF genai-proxy (JWT) -> ISVC (no auth header)
 C: playground -> vllm-inference-N  -> ISVC direct (no BFF involved)
+D: playground -> genai-bff-proxy -> BFF genai-proxy (JWT) -> ISVC (model field must be
+   the full namespaced ID RedHatAI/granite-embedding-english-r2 — vLLM serves it under
+   that name and rejects the truncated granite-embedding-english-r2)
 ```
 
 Chat flow (LLM leg, same request as the file_search leg):
@@ -113,14 +123,20 @@ oc apply -f 02-gemini-embedding-api-key.yaml
 # 3. Granite embedding ISVC (vLLM CPU) — takes ~5 min to pull + download the model
 oc apply -f 03-isvc-granite.yaml
 oc wait --for=condition=Ready isvc/granite-embedding-r2 -n $NAMESPACE --timeout=600s
-# sanity: both served names must work
+# sanity: all three served names must work
 POD=$(oc get pods -n $NAMESPACE -o name | grep granite-embedding-r2-predictor | sed 's|pod/||')
 oc exec -n $NAMESPACE $POD -c kserve-container -- curl -s localhost:8080/v1/embeddings \
   -H 'Content-Type: application/json' -d '{"model":"granite-embedding-r2","input":"ping"}' | jq '.data[0].embedding | length'   # 768
 oc exec -n $NAMESPACE $POD -c kserve-container -- curl -s localhost:8080/v1/embeddings \
   -H 'Content-Type: application/json' -d '{"model":"granite-embedding-keyless","input":"ping"}' | jq '.data[0].embedding | length' # 768
+oc exec -n $NAMESPACE $POD -c kserve-container -- curl -s localhost:8080/v1/embeddings \
+  -H 'Content-Type: application/json' -d '{"model":"RedHatAI/granite-embedding-english-r2","input":"ping"}' | jq '.data[0].embedding | length' # 768
+# sanity (documents the pre-fix failure mode): vLLM rejects the truncated name —
+# this is what the BFF's old first-slash chop would have sent upstream
+oc exec -n $NAMESPACE $POD -c kserve-container -- curl -s localhost:8080/v1/embeddings \
+  -H 'Content-Type: application/json' -d '{"model":"granite-embedding-english-r2","input":"ping"}' | jq '.detail // .error'  # model not found
 
-# 4/5. ConfigMaps: custom model endpoints (keyed + keyless) and the three vector stores
+# 4/5. ConfigMaps: custom model endpoints (keyed + keyless bare + keyless namespaced) and the four vector stores
 oc apply -f 04-custom-model-endpoints-cm.yaml -f 05-vector-stores-cm.yaml
 
 # 6. Chat LLM: Gemini 2.5 Flash-Lite (litellm) LLMInferenceService + MaaSModelRef,
@@ -133,16 +149,16 @@ oc wait --for=condition=Ready maasmodelref/gemini-proxy -n $NAMESPACE --timeout=
 # 7. Install the playground via the BFF API (two-phase, see script header for why)
 ./install-playground.sh
 
-# 8. Ingest the weather test chunk into all three stores (pre-computed embeddings)
+# 8. Ingest the weather test chunk into all four stores (pre-computed embeddings)
 ./ingest-weather.sh
 
-# 9. Query all three stores through the file_search code path
+# 9. Query all four stores through the file_search code path
 ./query-stores.sh
 
 # 10. Prove per-request Secret resolution on the keyed path
 ./negative-test-keyed.sh
 
-# 11. Full RAG chat E2E over all three stores (LLM + file_search + citations)
+# 11. Full RAG chat E2E over all four stores (LLM + file_search + citations)
 ./chat-test.sh
 ```
 
@@ -150,11 +166,15 @@ oc wait --for=condition=Ready maasmodelref/gemini-proxy -n $NAMESPACE --timeout=
 
 **Config shape** (printed by `install-playground.sh`): see the Architecture
 section — the assertions that matter are *no direct provider entries* for the
-custom-endpoint providers, and the three vector store bindings above.
+custom-endpoint providers, and the four vector store bindings above.
 
-**`query-stores.sh`**: `PASS` for all three stores — the weather chunk
+**`query-stores.sh`**: `PASS` for all four stores — the weather chunk
 ("sunny, high of 25 degrees…") is retrieved from each, and the playground log
-contains **zero** `Failed to search vector store` errors.
+contains **zero** `Failed to search vector store` errors. Store D
+(`vs-e2e-granite-namespaced-ce`) specifically proves the namespaced model ID
+survives the proxy hop: pre-fix it fails with vLLM's model-not-found error
+(the BFF truncated `RedHatAI/granite-embedding-english-r2` to
+`granite-embedding-english-r2`); post-fix it retrieves like the others.
 
 **`negative-test-keyed.sh`**: with the Secret's key corrupted, the keyed query
 fails with `400 'Please pass a valid API key'` (the bug's *symptom* — but now
@@ -191,6 +211,35 @@ answer quotes the weather content with `file_citation` annotations. Notes:
 | Chat E2E per store: `file_search_call` + 1 chunk + weather answer w/ citations | ✅ (3/3 retrieval; flash-lite message text intermittent — see notes) |
 | Go unit tests (`internal/integrations/kubernetes/...`) | ✅ |
 
+### Verified run — follow-up fix (provider-native model IDs, store D)
+
+2026-10-19 on `jhrhoai-jenk` (RHOAI 3.6.0), BFF image
+`quay.io/johnh/odh-mod-arch-gen-ai:dev` built from PR head `52a19550e`
+(`fix(gen-ai): ensure provider-native model ID included in
+GenAIProxyNSEmbeddingsHandler path` — the embeddings proxy handler now rewrites
+the proxied body's `model` with the ConfigMap-resolved model ID instead of
+chopping the first slash-delimited segment):
+
+| Check | Result |
+|---|---|
+| ISVC serves all three names incl. `RedHatAI/granite-embedding-english-r2` (768d) | ✅ |
+| ISVC rejects the truncated `granite-embedding-english-r2` with 404 — the pre-fix failure mode the BFF chop would have produced | ✅ (documented) |
+| Generated config: namespaced CE model under `genai-bff-proxy`, model_id preserved verbatim | ✅ |
+| Generated config: store D binds to `genai-bff-proxy/RedHatAI/granite-embedding-english-r2` | ✅ |
+| Generated config: no direct provider entry for `granite-embed-provider`; ISVC model under `vllm-inference-4` | ✅ |
+| Query keyed store (Gemini) — chunk retrieved | ✅ |
+| Query keyless CE store (bare ID via proxy) — chunk retrieved | ✅ |
+| Query namespace ISVC store (granite direct) — chunk retrieved | ✅ |
+| **Query namespaced CE store (D) — chunk retrieved through the proxy with the full namespaced model ID** | ✅ |
+| Playground logs free of `Failed to search vector store` | ✅ (0 occurrences) |
+| Negative test: corrupt key → 400 `Please pass a valid API key`; restore → works | ✅ |
+| Chat E2E per store (4 stores): `file_search_call` + 1 chunk each; store D answer cites the weather content | ✅ (4/4 retrieval; one flash-lite empty-message flake on the ISVC store — see notes) |
+
+Note: the ISVC provider suffix moved from `vllm-inference-3` (first verified run)
+to `vllm-inference-4` here — it equals the model's position in the install list,
+which gained the namespaced CE model. `ingest-weather.sh` now derives the
+qualified IDs from the generated config instead of hardcoding them.
+
 ### Coverage notes
 
 - Chat-level `/v1/responses` + file_search E2E **is** covered by `chat-test.sh`
@@ -209,10 +258,19 @@ answer quotes the weather content with `file_citation` annotations. Notes:
   the pgvector auto-provisioning *during* install. So: install (models only) →
   `DELETE /lsd/delete` with `preserve_vector_store: true` (strips pgvector
   owner refs so it survives the OGXServer delete) → install again with stores.
-- **One ISVC, two model names**: `--served-model-name` is a `nargs="+"` arg —
-  pass both names space-separated. Two distinct model IDs avoid the
+- **One ISVC, three model names**: `--served-model-name` is a `nargs="+"` arg —
+  pass all names space-separated. Distinct model IDs avoid the
   `buildEmbeddingModelLookup` collision (two registered models with the same
   bare id would make one store silently bind to the wrong provider).
+- **Namespaced model ID through the proxy (store D)**: OGX forwards the model's
+  `provider_resource_id` — the ConfigMap `model_id` — in the embeddings request
+  body, so for store D the BFF handler receives `RedHatAI/granite-embedding-english-r2`.
+  The handler must resolve the model from the ConfigMap and forward that exact ID
+  upstream (vLLM serves the namespaced name and rejects the truncated
+  `granite-embedding-english-r2` with a 404). The pre-fix handler chopped the
+  first slash-delimited segment unconditionally, which truncated namespaced IDs —
+  the follow-up fix (PR #10314, commit `52a19550e`) rewrites the model field with
+  the ConfigMap-resolved ID instead, mirroring the chat proxy handler.
 - **Custom endpoint base_url for the keyless granite**:
   `http://granite-embedding-r2-predictor.<ns>.svc.cluster.local:8080` — the
   predictor Service is **headless** (ClusterIP: None) in RawDeployment, so the
@@ -267,10 +325,10 @@ oc delete namespace embedding-e2e-100933
 | `02-gemini-embedding-api-key.yaml` | keyed-endpoint Secret (placeholder; gitignored by `*key.yaml`) |
 | `03-isvc-granite.yaml` | granite embedding ISVC (vLLM CPU, dual served names, /dev/shm, HF overrides) |
 | `04-custom-model-endpoints-cm.yaml` | `gen-ai-aa-custom-model-endpoints`: keyed Gemini + keyless granite providers |
-| `05-vector-stores-cm.yaml` | `gen-ai-aa-vector-stores`: three pgvector-backed stores |
+| `05-vector-stores-cm.yaml` | `gen-ai-aa-vector-stores`: four pgvector-backed stores |
 | `06-llmisvc-gemini-proxy.yaml` | Gemini 2.5 Flash-Lite chat LLM: litellm-config + LLMInferenceService + MaaSModelRef (MaaS path) |
 | `install-playground.sh` | two-phase BFF install (chat LLM + 3 embedding models + stores) + config-shape assertions |
 | `ingest-weather.sh` | compute embeddings (Google + ISVC) and insert the weather chunk into each store |
-| `query-stores.sh` | query all three stores through the file_search code path + log check |
+| `query-stores.sh` | query all four stores through the file_search code path + log check |
 | `negative-test-keyed.sh` | corrupt/restore the API key Secret to prove per-request resolution |
 | `chat-test.sh` | full RAG chat E2E per store: `/lsd/responses` + file_search + citations |

@@ -46,3 +46,10 @@ data:
         embedding_dimension: 768
         metadata:
           description: "Namespace embedding model served by vLLM ISVC - verifies unchanged static vLLM provider path"
+      - provider_id: pgvector-e2e-provider
+        vector_store_id: vs-e2e-granite-namespaced-ce
+        vector_store_name: "E2E Weather KB (RedHatAI/granite-embedding-english-r2, namespaced custom endpoint)"
+        embedding_model: RedHatAI/granite-embedding-english-r2
+        embedding_dimension: 768
+        metadata:
+          description: "Namespaced (HF-style) model ID via custom endpoint - verifies the proxy preserves provider-native model IDs end to end (PR #10314 follow-up fix)"

@@ -45,7 +45,7 @@ chat() { # $1 = vector store id, $2 = input text
 }
 
 PASS=0; RETRIEVAL_OK=0
-for STORE in vs-e2e-gemini-keyed vs-e2e-granite-keyless-ce vs-e2e-granite-isvc; do
+for STORE in vs-e2e-gemini-keyed vs-e2e-granite-keyless-ce vs-e2e-granite-isvc vs-e2e-granite-namespaced-ce; do
   RESULT=$(chat "$STORE" "Search the knowledge base: what does it say about the weather today?")
   FS=$(echo "$RESULT" | jq -r '[.data.output[]? | select(.type=="file_search_call") | .status] | join(",")')
   CHUNKS=$(echo "$RESULT" | jq -r '[.data.output[]? | select(.type=="file_search_call") | .results[]?] | length')

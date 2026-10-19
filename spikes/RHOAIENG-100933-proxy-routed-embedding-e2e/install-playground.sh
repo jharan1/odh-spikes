@@ -24,12 +24,14 @@ MODELS='[
   {"model_name": "publishers/embedding-e2e-100933/models/gemini-proxy", "model_source_type": "maas"},
   {"model_name": "gemini-embedding-001", "model_source_type": "custom_endpoint", "model_type": "embedding", "embedding_dimension": 3072},
   {"model_name": "granite-embedding-keyless", "model_source_type": "custom_endpoint", "model_type": "embedding", "embedding_dimension": 768},
-  {"model_name": "granite-embedding-r2", "model_source_type": "namespace", "model_type": "embedding", "embedding_dimension": 768}
+  {"model_name": "granite-embedding-r2", "model_source_type": "namespace", "model_type": "embedding", "embedding_dimension": 768},
+  {"model_name": "RedHatAI/granite-embedding-english-r2", "model_source_type": "custom_endpoint", "model_type": "embedding", "embedding_dimension": 768}
 ]'
 STORES='[
   {"vector_store_id": "vs-e2e-gemini-keyed"},
   {"vector_store_id": "vs-e2e-granite-keyless-ce"},
-  {"vector_store_id": "vs-e2e-granite-isvc"}
+  {"vector_store_id": "vs-e2e-granite-isvc"},
+  {"vector_store_id": "vs-e2e-granite-namespaced-ce"}
 ]'
 
 echo ">>> Pre-flight: if a playground already exists, reconfigure-delete it first (keeps pgvector + data)"
@@ -85,11 +87,13 @@ oc get cm llama-stack-config -n "$NAMESPACE" -o yaml | sed -n '/config.yaml/,/ki
   | sed -n '/registered_resources/,$p'
 echo
 echo "Expected:"
-echo "  - gemini-embedding-001        under provider_id: genai-bff-proxy   (keyed, proxy-routed)"
-echo "  - granite-embedding-keyless   under provider_id: genai-bff-proxy   (keyless, proxy-routed)"
-echo "  - granite-embedding-r2        under provider_id: vllm-inference-3  (namespace ISVC, unchanged)"
+echo "  - gemini-embedding-001                  under provider_id: genai-bff-proxy   (keyed, proxy-routed)"
+echo "  - granite-embedding-keyless             under provider_id: genai-bff-proxy   (keyless, proxy-routed)"
+echo "  - RedHatAI/granite-embedding-english-r2 under provider_id: genai-bff-proxy   (namespaced CE, proxy-routed — model_id preserved verbatim)"
+echo "  - granite-embedding-r2                  under provider_id: vllm-inference-N  (namespace ISVC, unchanged; N = position in the install model list)"
 echo "  - NO provider entry for gemini-embedding-provider / granite-embed-provider"
 echo "  - vector store bindings:"
-echo "      vs-e2e-gemini-keyed      -> genai-bff-proxy/gemini-embedding-001"
-echo "      vs-e2e-granite-keyless-ce-> genai-bff-proxy/granite-embedding-keyless"
-echo "      vs-e2e-granite-isvc      -> vllm-inference-3/granite-embedding-r2"
+echo "      vs-e2e-gemini-keyed        -> genai-bff-proxy/gemini-embedding-001"
+echo "      vs-e2e-granite-keyless-ce  -> genai-bff-proxy/granite-embedding-keyless"
+echo "      vs-e2e-granite-isvc        -> vllm-inference-N/granite-embedding-r2"
+echo "      vs-e2e-granite-namespaced-ce -> genai-bff-proxy/RedHatAI/granite-embedding-english-r2"

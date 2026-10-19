@@ -9,9 +9,11 @@
 # passthrough_api_key to authenticate to the BFF genai-proxy.
 #
 # Per-store expected flow:
-#   vs-e2e-gemini-keyed        playground -> genai-bff-proxy -> BFF -> Google (Secret-sourced API key)
-#   vs-e2e-granite-keyless-ce  playground -> genai-bff-proxy -> BFF -> ISVC  (no auth header)
-#   vs-e2e-granite-isvc        playground -> vllm-inference-3 -> ISVC direct (no BFF, no regression)
+#   vs-e2e-gemini-keyed          playground -> genai-bff-proxy -> BFF -> Google (Secret-sourced API key)
+#   vs-e2e-granite-keyless-ce    playground -> genai-bff-proxy -> BFF -> ISVC  (no auth header)
+#   vs-e2e-granite-isvc          playground -> vllm-inference-3 -> ISVC direct (no BFF, no regression)
+#   vs-e2e-granite-namespaced-ce playground -> genai-bff-proxy -> BFF -> ISVC  (namespaced model ID
+#                                RedHatAI/granite-embedding-english-r2 must reach vLLM verbatim)
 #
 # Usage:
 #   NAMESPACE=embedding-e2e-100933 QUERY="What is the weather today?" ./query-stores.sh
@@ -24,7 +26,7 @@ POD="$(oc get pods -n "$NAMESPACE" -o name | grep lsd-genai-playground | head -1
 [ -n "$POD" ] || { echo "playground pod not found in $NAMESPACE"; exit 1; }
 
 PASS=0; FAIL=0
-for STORE in vs-e2e-gemini-keyed vs-e2e-granite-keyless-ce vs-e2e-granite-isvc; do
+for STORE in vs-e2e-gemini-keyed vs-e2e-granite-keyless-ce vs-e2e-granite-isvc vs-e2e-granite-namespaced-ce; do
   RESULT=$(oc exec -n "$NAMESPACE" "$POD" -- bash -c \
     "curl -s -X POST http://localhost:8321/v1/vector-io/query \
       -H 'Content-Type: application/json' \

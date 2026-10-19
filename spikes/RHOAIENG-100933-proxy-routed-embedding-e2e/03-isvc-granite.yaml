@@ -32,6 +32,7 @@ spec:
           - --served-model-name
           - granite-embedding-r2
           - granite-embedding-keyless
+          - RedHatAI/granite-embedding-english-r2
           - --gpu-memory-utilization=0.6
         ports:
           - containerPort: 8080

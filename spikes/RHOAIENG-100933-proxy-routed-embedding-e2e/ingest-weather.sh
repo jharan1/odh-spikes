@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# ingest-weather.sh — insert the weather test chunk into each of the three stores.
+# ingest-weather.sh — insert the weather test chunk into each of the four stores.
 #
 # External vector stores are query-only in the current UX (uploads go to the
 # auto-provisioned store with the inline default embedding model), so test data
@@ -9,8 +9,9 @@
 #   - the Gemini embedding (3072 dims) is computed directly against Google's
 #     OpenAI-compatible endpoint using the API key from the Secret
 #   - the granite embedding (768 dims) is computed against the ISVC
-#     (the same vLLM model serves both granite-embedding-r2 and
-#     granite-embedding-keyless, so one embedding covers both stores)
+#     (the same vLLM model serves granite-embedding-r2, granite-embedding-keyless
+#     and RedHatAI/granite-embedding-english-r2, so one embedding covers all
+#     three granite stores)
 #
 # The insert payload is an OGX EmbeddedChunk: the same shape the file_search
 # ingestion path writes (see ogx providers/remote/vector_io/pgvector — table
@@ -46,6 +47,13 @@ DIMS=$(jq '.data[0].embedding | length' "$WORK/granite.json")
 [ "$DIMS" = "768" ] || { echo "unexpected granite dims: $DIMS"; exit 1; }
 
 echo ">>> Building insert payloads"
+# Qualified embedding model per store, read from the GENERATED llama-stack-config
+# (the vllm-inference-N suffix depends on the install model list position, so
+# don't hardcode it).
+qualified() { # $1 = vector_store_id -> embedding_model from llama-stack-config
+  oc get cm llama-stack-config -n "$NAMESPACE" -o jsonpath='{.data.config\.yaml}' \
+    | grep -A1 "vector_store_id: $1" | grep 'embedding_model:' | awk '{print $2}'
+}
 make_payload() { # $1=store $2=embedding-file $3=qualified-model $4=dim
   jq -nc --arg content "$WEATHER" --slurpfile emb "$2" '{
     vector_store_id: $store,
@@ -60,12 +68,13 @@ make_payload() { # $1=store $2=embedding-file $3=qualified-model $4=dim
     }]
   }' --arg store "$1" --arg model "$3" --argjson dim "$4"
 }
-make_payload vs-e2e-gemini-keyed       "$WORK/gemini.json"  genai-bff-proxy/gemini-embedding-001    3072 > "$WORK/ins-gemini.json"
-make_payload vs-e2e-granite-keyless-ce "$WORK/granite.json" genai-bff-proxy/granite-embedding-keyless 768 > "$WORK/ins-ce.json"
-make_payload vs-e2e-granite-isvc       "$WORK/granite.json" vllm-inference-3/granite-embedding-r2    768 > "$WORK/ins-isvc.json"
+make_payload vs-e2e-gemini-keyed       "$WORK/gemini.json"  "$(qualified vs-e2e-gemini-keyed)"       3072 > "$WORK/ins-gemini.json"
+make_payload vs-e2e-granite-keyless-ce "$WORK/granite.json" "$(qualified vs-e2e-granite-keyless-ce)" 768 > "$WORK/ins-ce.json"
+make_payload vs-e2e-granite-isvc       "$WORK/granite.json" "$(qualified vs-e2e-granite-isvc)"       768 > "$WORK/ins-isvc.json"
+make_payload vs-e2e-granite-namespaced-ce "$WORK/granite.json" "$(qualified vs-e2e-granite-namespaced-ce)" 768 > "$WORK/ins-ns.json"
 
 echo ">>> Inserting into the playground ($POD)"
-for f in ins-gemini ins-ce ins-isvc; do
+for f in ins-gemini ins-ce ins-isvc ins-ns; do
   oc cp "$WORK/$f.json" "$NAMESPACE/$POD:/tmp/$f.json"
   CODE=$(oc exec -n "$NAMESPACE" "$POD" -- curl -s -o /dev/null -w "%{http_code}" \
     -X POST http://localhost:8321/v1/vector-io/insert \
@@ -78,5 +87,6 @@ echo ">>> Row counts in pgvector (table per store: vs_<id, dashes->underscores>)
 oc exec -n "$NAMESPACE" deployment/genai-pgvector -- psql -U vectoruser -d vectordb -t -c \
   "SELECT 'gemini_keyed: '  || count(*) FROM vs_vs_e2e_gemini_keyed
      UNION ALL SELECT 'granite_ce: '   || count(*) FROM vs_vs_e2e_granite_keyless_ce
-     UNION ALL SELECT 'granite_isvc: ' || count(*) FROM vs_vs_e2e_granite_isvc"
+     UNION ALL SELECT 'granite_isvc: ' || count(*) FROM vs_vs_e2e_granite_isvc
+     UNION ALL SELECT 'granite_ns_ce: ' || count(*) FROM vs_vs_e2e_granite_namespaced_ce"
 echo "Expected: 1 row in each"

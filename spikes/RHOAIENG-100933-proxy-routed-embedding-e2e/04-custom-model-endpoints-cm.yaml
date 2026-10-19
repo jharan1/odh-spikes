@@ -34,3 +34,9 @@ data:
         metadata:
           display_name: Granite Embedding R2 (keyless custom endpoint)
           embedding_dimension: 768
+      - provider_id: granite-embed-provider
+        model_id: RedHatAI/granite-embedding-english-r2
+        model_type: embedding
+        metadata:
+          display_name: Granite Embedding R2 (namespaced custom endpoint)
+          embedding_dimension: 768

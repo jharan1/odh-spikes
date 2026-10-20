@@ -17,7 +17,13 @@ NAMESPACE="${NAMESPACE:-embedding-e2e-100933}"
 DASHBOARD_URL="${DASHBOARD_URL:?set DASHBOARD_URL, e.g. https://rh-ai.apps.example.com}"
 TOKEN="${TOKEN:-$(oc whoami -t)}"
 MAAS_MODEL="${MAAS_MODEL:-publishers/${NAMESPACE}/models/gemini-proxy}"
-MAAS_URI="${MAAS_URI:-https://maas.apps.jhrhoai-jenk.j1t5.p1.openshiftapps.com/}"
+# The MaaS gateway host follows the cluster's app domain: https://maas.<domain>/
+# (the catalog model URL — NOT the /maas-api control path, which is only for
+# token issuance via the wrapper's MAAS_GATEWAY_URL).
+CLUSTER_DOMAIN="${DASHBOARD_URL#*//}"   # strip scheme: rh-ai.apps.<domain>
+CLUSTER_DOMAIN="${CLUSTER_DOMAIN#*.}"   # drop the first label:      apps.<domain>
+CLUSTER_DOMAIN="${CLUSTER_DOMAIN%/}"    # strip any trailing slash
+MAAS_URI="${MAAS_URI:-https://maas.${CLUSTER_DOMAIN}/}"
 SUBSCRIPTION="${SUBSCRIPTION:-gemini-subscription}"
 
 store_for() { # $1 = agent name -> vector store id

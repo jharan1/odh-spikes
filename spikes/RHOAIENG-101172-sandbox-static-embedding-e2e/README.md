@@ -67,6 +67,8 @@ caller -> agent route /v1/responses (JWT, SSAR get-sandboxes — the ONLY
 | `agent-keyless-vs` | `vs-e2e-granite-keyless-ce` | `granite-embedding-keyless` (768d), custom endpoint → in-cluster ISVC | keyless custom endpoints work with the placeholder config api_key |
 | `agent-isvc-vs` | `vs-e2e-granite-isvc` | `granite-embedding-r2` (768d), namespace ISVC | ISVC-served models register as `remote::vllm` and authenticate none |
 | `agent-namespaced-vs` | `vs-e2e-granite-namespaced-ce` | `RedHatAI/granite-embedding-english-r2` (768d), custom endpoint → ISVC | namespaced (HF-style) model IDs are preserved verbatim (provider-qualified reference and request body) |
+| `agent-llmisvc-servedref` | `vs-e2e-llmisvc-servedref` | `granite-embedding-alias` (768d) — the LLMISVC **served model name** (`spec.model.name`), ≠ resource name `granite-embed-llmisvc` | served-name references resolve to the LLMInferenceService (second-pass `spec.model.name` match) and register under the served name |
+| `agent-llmisvc-resref` | `vs-e2e-llmisvc-resref` | `granite-embed-llmisvc` — the LLMISVC **resource name** | resource-name references resolve too, and register under the *served* name (`granite-embedding-alias`), matching playground behavior when `spec.model.name` differs |
 
 B, C and D deliberately share one vLLM ISVC (it serves all three names) — the
 same granite model reached through different registration paths.
@@ -150,6 +152,9 @@ key-ref validation fail-fast):
 | Chat E2E keyless CE store — 1 chunk (score ≈10.1), answer cites weather | ✅ |
 | Chat E2E namespace ISVC store (remote::vllm) — 1 chunk (score ≈10.1), answer cites weather | ✅ |
 | Chat E2E namespaced CE store (model id preserved verbatim) — 1 chunk, answer cites weather | ✅ |
+| LLMISVC served-name reference (`granite-embedding-alias` ≠ resource name): resolves via `spec.model.name` match, registers under the served name | ✅ (config-level; chat blocked by gateway auth, see findings) |
+| LLMISVC resource-name reference: resolves by resource name, registers under the served name (playground parity) | ✅ (config-level) |
+| vLLM workload accepts the served alias (direct `kserve-workload-svc` call → 768-dim embedding) | ✅ |
 | Agent pod logs free of `Failed to search vector store` | ✅ (0 occurrences) |
 | Negative test: corrupt key → fresh agent → chat returns 0 chunks and the pod log shows Google `400 Please pass a valid API key` (also reproducible via a direct `/v1/embeddings` probe with the corrupted `passthrough_api_key`); already-deployed agents unaffected; restore → clean | ✅ |
 | Go unit tests (`internal/integrations/kubernetes/...`) + golangci-lint | ✅ |
@@ -183,6 +188,18 @@ same projected `service-ca.crt` for its in-cluster TLS.
 - **Deployment name uniqueness**: agent deployment names are unique per
   project — re-running `deploy-agents.sh` needs
   `oc delete sandbox --all -n $NAMESPACE` (or per-agent) first, else HTTP 409.
+- **LLMInferenceService endpoints are gateway-routed, and the gateways block
+  direct pod-to-pod calls on this cluster** (pre-existing, affects the
+  playground's namespace-model path identically — the reason the e2e chat LLM
+  uses MaaS): the maas gateway's `gateway-internal` HTTPS address resets the
+  TLS connection (unknown SNI), and the default inference gateway answers
+  `401` without a token. The served-name resolution is therefore verified at
+  the config level (both reference directions), server-side (the vLLM workload
+  accepts the served alias — a direct `kserve-workload-svc` call returned a
+  768-dim embedding), and by the failure mode: the agent pod logs show
+  `Error code: 401` from the gateway for the correctly-named
+  `agent-embedding-1/granite-embedding-alias` request — not an HF download
+  (misclassification) or a model-name error.
 
 ## OGX facts this design relies on (verified from the running OGX source)
 

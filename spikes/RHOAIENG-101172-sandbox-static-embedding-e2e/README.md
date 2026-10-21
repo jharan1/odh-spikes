@@ -152,12 +152,58 @@ key-ref validation fail-fast):
 | Chat E2E keyless CE store — 1 chunk (score ≈10.1), answer cites weather | ✅ |
 | Chat E2E namespace ISVC store (remote::vllm) — 1 chunk (score ≈10.1), answer cites weather | ✅ |
 | Chat E2E namespaced CE store (model id preserved verbatim) — 1 chunk, answer cites weather | ✅ |
-| LLMISVC served-name reference (`granite-embedding-alias` ≠ resource name): resolves via `spec.model.name` match, registers under the served name | ✅ (config-level; chat blocked by gateway auth, see findings) |
-| LLMISVC resource-name reference: resolves by resource name, registers under the served name (playground parity) | ✅ (config-level) |
-| vLLM workload accepts the served alias (direct `kserve-workload-svc` call → 768-dim embedding) | ✅ |
-| Agent pod logs free of `Failed to search vector store` | ✅ (0 occurrences) |
+| LLMISVC served-name reference (`granite-embedding-alias` ≠ resource name): resolves via `spec.model.name` match, registers under the served name | ✅ |
+| LLMISVC resource-name reference: resolves by resource name, registers under the served name (playground parity) | ✅ |
+| Chat E2E LLMISVC served-name store — 1 chunk (score ≈12.7), answer quotes the weather report with citation | ✅ |
+| Chat E2E LLMISVC resource-name store — 1 chunk, answer cites weather | ✅ |
+| Agent pod logs free of `Failed to search vector store` (all agents incl. both LLMISVC ones) | ✅ (0 occurrences) |
 | Negative test: corrupt key → fresh agent → chat returns 0 chunks and the pod log shows Google `400 Please pass a valid API key` (also reproducible via a direct `/v1/embeddings` probe with the corrupted `passthrough_api_key`); already-deployed agents unaffected; restore → clean | ✅ |
 | Go unit tests (`internal/integrations/kubernetes/...`) + golangci-lint | ✅ |
+
+### Verified run — local sentence-transformers path (2026-10-21, follow-up)
+
+The matrix above covers remote-backed models only; a follow-up run on
+`jhrhoai-jenk` verified the **built-in local HF path** end-to-end (fresh
+namespace `embedding-e2e-local`, same BFF image, chat LLM reused from the
+`tracing` namespace's MaaS `gemini-proxy`):
+
+| Check | Result |
+|---|---|
+| Store `vs-e2e-local-st` (embedding model `ibm-granite/granite-embedding-125m-english`, 768d) classifies as local — no ISVC/CE lookup hit, no `agent-embedding-N` provider created | ✅ |
+| Generated config: model registered under the inline `sentence-transformers` provider (`provider_model_id: ibm-granite/granite-embedding-125m-english`), store bound to it, `default_embedding_model` repointed | ✅ |
+| `/v1/embeddings` through the sandbox route loads the model in-process from the baked HF cache and returns 768-dim vectors | ✅ |
+| Chunk ingested via the sandbox's own `/v1/vector-io/insert` (after hand-creating the `vs_vs_e2e_local_st` table — see findings) | ✅ |
+| Chat E2E — file_search `completed`, 1 chunk (score ≈9.68), answer quotes the weather report with `<\|weather-doc-001\|>` citation | ✅ |
+| Pod log: 0 `Failed to search vector store`; `Loading sentence transformer for ibm-granite/...` at query time | ✅ |
+
+Findings from this run:
+
+- **Sandboxes are HF-offline by design**: the (pre-existing) sandbox env pins
+  `HF_HUB_OFFLINE=1`/`TRANSFORMERS_OFFLINE=1`/`HF_DATASETS_OFFLINE=1`, so only
+  models pre-baked into the sandbox image work locally — currently
+  `ibm-granite/granite-embedding-125m-english` (768d), `nomic-ai/nomic-embed-text-v1.5`,
+  and `Qwen/Qwen3-Reranker-0.6B`. A store referencing any other local HF model
+  (e.g. `sentence-transformers/all-MiniLM-L6-v2`) fails at runtime with an offline-mode
+  download error — pre-existing behavior, unchanged by this PR. The config-level
+  registration for such a store is still generated correctly (verified with
+  `all-MiniLM-L6-v2` before switching to the pre-baked model).
+- **`granite-embedding-125m-english` is 768-dim** — a store's `embedding_dimension`
+  must match or pgvector insert/query fails on the vector(N) column.
+- **OGX pgvector insert does not auto-create tables**: the per-store table
+  (`vs_<id>`: `id text PRIMARY KEY, document jsonb, embedding vector(N),
+  content_text text, tokenized_content tsvector`) must exist; the insert SQL uses
+  `ON CONFLICT (id)` so `id` needs the PK/unique constraint. (The playground path
+  creates tables during install; sandbox-only stores don't have that step.)
+- **Stale MaaS modelRefs can empty the whole catalog**: after the original E2E
+  namespace was deleted, `gemini-subscription` still referenced
+  `embedding-e2e-100933/gemini-proxy` → subscription `Failed` ("all model
+  references are invalid or unavailable") → the MaaS catalog listed zero models,
+  breaking *all* MaaS installs cluster-wide. Fix: remove stale refs from
+  `maassubscription`/`maasauthpolicy` (and the orphaned `maasmodelref`).
+- **Orphaned namespaced objects after a forced namespace deletion**: deleting a
+  namespace that was force-removed leaves objects in etcd that still LIST
+  cluster-wide but return NotFound on delete. Fix: re-create the namespace, delete
+  the objects, then delete the namespace again.
 
 Note: the cluster-local E2E endpoints are plain `http://`, so the service-CA
 path is verified by config inspection + projected-file presence rather than
@@ -188,18 +234,20 @@ same projected `service-ca.crt` for its in-cluster TLS.
 - **Deployment name uniqueness**: agent deployment names are unique per
   project — re-running `deploy-agents.sh` needs
   `oc delete sandbox --all -n $NAMESPACE` (or per-agent) first, else HTTP 409.
-- **LLMInferenceService endpoints are gateway-routed, and the gateways block
-  direct pod-to-pod calls on this cluster** (pre-existing, affects the
-  playground's namespace-model path identically — the reason the e2e chat LLM
-  uses MaaS): the maas gateway's `gateway-internal` HTTPS address resets the
-  TLS connection (unknown SNI), and the default inference gateway answers
-  `401` without a token. The served-name resolution is therefore verified at
-  the config level (both reference directions), server-side (the vLLM workload
-  accepts the served alias — a direct `kserve-workload-svc` call returned a
-  768-dim embedding), and by the failure mode: the agent pod logs show
-  `Error code: 401` from the gateway for the correctly-named
-  `agent-embedding-1/granite-embedding-alias` request — not an HF download
-  (misclassification) or a model-name error.
+- **LLMInferenceService routes are protected by Kuadrant AuthPolicy by design**: the
+  `odh-model-controller` creates an AuthPolicy (kubernetes-user TokenReview authn)
+  for every Gateway an LLMInferenceService attaches to — the `401` on gateway URLs
+  without a token is intentional model-serving governance, not a bug, and affects
+  the playground's namespace-model path identically (the reason the e2e chat LLM
+  uses MaaS). To unblock the sandbox chat E2E on a dev cluster: create a plain
+  `openshift-default`-class Gateway in the test namespace, point the LLMISVC's
+  `spec.router.gateway.refs` at it, scale `deploy/odh-model-controller` (redhat-ods-applications)
+  to 0, delete the auto-created AuthPolicy, and scale the controller back up after
+  testing (it recreates the policy). Kuadrant AuthPolicy is deny-by-default for its
+  target — patching the path patterns is not enough; the policy must be absent.
+  With that, the full chain works pod-to-pod: store reference → `spec.model.name`
+  match → `agent-embedding-1/granite-embedding-alias` (remote::vllm) → gateway →
+  vLLM → 1 chunk (score ≈12.7) → answer quoting the weather report.
 
 ## OGX facts this design relies on (verified from the running OGX source)
 

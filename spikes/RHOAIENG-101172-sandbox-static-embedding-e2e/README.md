@@ -29,10 +29,20 @@ dashboard's genai-proxy for embeddings:
 
 | Model source | Provider registered | Auth |
 |---|---|---|
-| Custom endpoint (keyed) | `agent-embedding-N` = `remote::passthrough`, base URL `/v1`-stripped, TLS verify off for `*.svc.cluster.local` | deploy-time Secret snapshot → deployment-owned Secret → `AGENT_EMBEDDING_API_KEY` env → the wrapper injects `passthrough_api_key` provider data (same mechanism as `AGENT_MODEL_API_KEY`/`openai_api_key` for the LLM) |
+| Custom endpoint (keyed) | `agent-embedding-N` = `remote::passthrough`, base URL `/v1`-stripped | deploy-time Secret snapshot → deployment-owned Secret → `AGENT_EMBEDDING_API_KEY` env → the wrapper injects `passthrough_api_key` provider data (same mechanism as `AGENT_MODEL_API_KEY`/`openai_api_key` for the LLM) |
 | Custom endpoint (keyless) | same `remote::passthrough` shape | static config `api_key: fake` — OGX's passthrough adapter cannot issue unauthenticated requests (the OpenAI SDK rejects an empty api_key with no `Authorization` header); endpoints without auth ignore the header. Mirrors the BFF's `fetchSecretFromProvider` "fake" default |
 | ISVC / LLMInferenceService | `agent-embedding-N` = `remote::vllm`, ISVC URL including `/v1` (playground parity) | none (vLLM `NO KEY REQUIRED`) |
 | Local HuggingFace | inline `sentence-transformers` (unchanged) | n/a |
+
+Cluster-local providers (custom endpoint and ISVC alike) set
+`network.tls.verify` to the OpenShift service-serving CA bundle projected into
+every pod's service-account volume
+(`/var/run/secrets/kubernetes.io/serviceaccount/service-ca.crt`) — TLS
+verification is never disabled, and the API key never travels over an
+unverified channel. The sandbox env no longer sets `VLLM_TLS_VERIFY=false`
+(it was cargo-culted from the playground install path; OGX migrates the
+deprecated `tls_verify` field into `network.tls.verify`, so it really did
+disable verification for `remote::vllm` providers).
 
 A sandbox installs a **single** embedding API key: referencing keyed
 custom-endpoint embedding models backed by *different* Secrets is rejected at
@@ -121,25 +131,33 @@ deployed agents (they keep the key they were deployed with).
 
 ### Verified run
 
-2026-10-20 on `jhrhoai-jenk` (RHOAI 3.6.0), BFF image
+2026-10-21 on `jhrhoai-jenk` (RHOAI 3.6.0), BFF image
 `quay.io/johnh/odh-mod-arch-gen-ai:dev` built from branch
-`fix/RHOAIENG-101172-sandbox-static-embedding-providers` (working tree with
-the keyless `api_key: fake` fix included):
+`fix/RHOAIENG-101172-sandbox-static-embedding-providers` including the
+review-fix commits (TLS service-CA verification, sandbox vLLM TLS fix,
+key-ref validation fail-fast):
 
 | Check | Result |
 |---|---|
-| Generated config: keyed CE model under `agent-embedding-1` (`remote::passthrough`), no sentence-transformers registration for it | ✅ |
+| Generated config: keyed CE model under `agent-embedding-1` (`remote::passthrough`), no sentence-transformers registration for it, no network block (external URL, public-CA verification) | ✅ |
 | Generated config: keyless CE + namespaced CE models under `agent-embedding-1` (`remote::passthrough`) | ✅ |
 | Generated config: ISVC model under `agent-embedding-1` (`remote::vllm`, ISVC URL with `/v1`) | ✅ |
-| Generated config: passthrough base URLs carry no trailing `/v1`; cluster-local endpoints get `network.tls.verify=false` | ✅ |
+| Generated config: passthrough base URLs carry no trailing `/v1`; cluster-local endpoints get `network.tls.verify: /var/run/secrets/kubernetes.io/serviceaccount/service-ca.crt` (no more `verify: false`) | ✅ |
+| Generated config: vLLM provider carries the same service-CA `network.tls.verify` and no deprecated `tls_verify` key | ✅ |
+| Sandbox env: no `VLLM_TLS_VERIFY` (removed); `service-ca.crt` confirmed present in the sandbox pod's service-account volume | ✅ |
 | `AGENT_EMBEDDING_API_KEY` present only on the keyed agent, value matches the Google key | ✅ |
 | Chat E2E keyed store (Gemini via passthrough + env-sourced key) — 1 chunk (score ≈3.35), answer cites weather | ✅ |
 | Chat E2E keyless CE store — 1 chunk (score ≈10.1), answer cites weather | ✅ |
 | Chat E2E namespace ISVC store (remote::vllm) — 1 chunk (score ≈10.1), answer cites weather | ✅ |
 | Chat E2E namespaced CE store (model id preserved verbatim) — 1 chunk, answer cites weather | ✅ |
 | Agent pod logs free of `Failed to search vector store` | ✅ (0 occurrences) |
-| Negative test: corrupt key → fresh agent → Google `400 Please pass a valid API key` in the pod log; restore → clean | ✅ |
+| Negative test: corrupt key → fresh agent → chat returns 0 chunks and the pod log shows Google `400 Please pass a valid API key` (also reproducible via a direct `/v1/embeddings` probe with the corrupted `passthrough_api_key`); already-deployed agents unaffected; restore → clean | ✅ |
 | Go unit tests (`internal/integrations/kubernetes/...`) + golangci-lint | ✅ |
+
+Note: the cluster-local E2E endpoints are plain `http://`, so the service-CA
+path is verified by config inspection + projected-file presence rather than
+a runtime TLS handshake; the OTel exporter in the same repo relies on the
+same projected `service-ca.crt` for its in-cluster TLS.
 
 ## Findings from the verified run
 
